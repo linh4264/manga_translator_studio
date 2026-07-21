@@ -1,0 +1,462 @@
+/* Custom Scrollbar for sleek dark look */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #020617;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #1e293b;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #4f46e5;
+}
+
+/* Manga Font Classes */
+.font-manga {
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+}
+
+.font-vietnamese {
+    font-family: 'Be Vietnam Pro', 'Inter', sans-serif;
+    font-weight: 600;
+    letter-spacing: 0;
+}
+
+.font-comic {
+    font-family: 'Patrick Hand', cursive;
+}
+
+.font-comicneue {
+    font-family: 'Comic Neue', cursive;
+    font-weight: 700;
+}
+
+.font-impact {
+    font-family: 'Bangers', cursive;
+    letter-spacing: 0.05em;
+}
+
+.font-marker {
+    font-family: 'Permanent Marker', cursive;
+}
+
+.font-bungee {
+    font-family: 'Bungee', cursive;
+}
+
+.font-caveat {
+    font-family: 'Caveat', cursive;
+    font-weight: 700;
+}
+
+.font-tech {
+    font-family: 'Chakra Petch', sans-serif;
+    font-weight: 700;
+}
+
+.font-condensed {
+    font-family: 'Saira Condensed', sans-serif;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+/* Workspace Grid and Overlays */
+.manga-container {
+    position: relative;
+    user-select: none;
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.5);
+    height: 100%;
+    max-height: 100%;
+}
+
+.bubble-overlay {
+    position: absolute;
+    cursor: move;
+    border: 1px dashed rgba(79, 70, 229, 0.4);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: left, top, width, height;
+    transform: translateZ(0);
+    /* Kích hoạt tăng tốc đồ họa phần cứng GPU */
+}
+
+/* Chống xuống hàng trong 1 chữ (Prevent breaking inside single words) */
+.bubble-overlay,
+.bubble-overlay * {
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    word-wrap: normal !important;
+    hyphens: none !important;
+    -webkit-hyphens: none !important;
+}
+
+.bubble-overlay:hover {
+    border-color: rgba(79, 70, 229, 1);
+    box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.5);
+}
+
+.bubble-overlay.active {
+    border: 2px solid #6366f1 !important;
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+    z-index: 50;
+}
+
+/* Resizing handles */
+.resize-handle {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background-color: #6366f1;
+    border: 1px solid #ffffff;
+    border-radius: 50%;
+    z-index: 60;
+    display: none;
+    /* Ẩn mặc định để tránh rối mắt trên toàn trang */
+}
+
+/* Chỉ hiện chấm kéo chỉnh kích thước khi block đang được chọn active */
+.bubble-overlay.active .resize-handle {
+    display: block;
+}
+
+.resize-se {
+    bottom: -5px;
+    right: -5px;
+    cursor: se-resize;
+}
+
+.resize-nw {
+    top: -5px;
+    left: -5px;
+    cursor: nw-resize;
+}
+
+.resize-ne {
+    top: -5px;
+    right: -5px;
+    cursor: ne-resize;
+}
+
+.resize-sw {
+    bottom: -5px;
+    left: -5px;
+    cursor: sw-resize;
+}
+
+/* Text styling configurations */
+.text-vertical {
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+}
+
+/* Skeleton loader animations */
+@keyframes pulse-slow {
+
+    0%,
+    100% {
+        opacity: 0.2;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+}
+
+.animate-pulse-slow {
+    animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Hide resize handles and dashed borders on export */
+.exporting-mode .resize-handle {
+    display: none !important;
+}
+
+.exporting-mode .bubble-overlay {
+    border: none !important;
+    box-shadow: none !important;
+    will-change: auto !important;
+}
+
+@media (max-width: 1024px) {
+    body {
+        height: auto;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    #app-shell {
+        flex-direction: column;
+        overflow: visible;
+        min-height: 100dvh;
+    }
+
+    #left-panel,
+    #right-panel {
+        display: none;
+        position: fixed;
+        top: 0.5rem;
+        left: 0.5rem;
+        right: 0.5rem;
+        bottom: 0.5rem;
+        width: auto;
+        max-width: none;
+        min-width: 0;
+        z-index: 60;
+        border-left: none;
+        border-right: none;
+        border-top: 1px solid rgb(30 41 59);
+        border-bottom: none;
+        border-radius: 1rem;
+        background: rgb(15 23 42);
+        box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.35);
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    body.mobile-menu-left-open #left-panel,
+    body.mobile-menu-right-open #right-panel {
+        display: flex;
+    }
+
+    #mobile-menu-backdrop {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 55;
+        background: rgba(2, 6, 23, 0.72);
+        backdrop-filter: blur(8px);
+    }
+
+    body.mobile-menu-left-open #mobile-menu-backdrop,
+    body.mobile-menu-right-open #mobile-menu-backdrop {
+        display: block;
+    }
+
+    #workspace-panel {
+        width: 100%;
+        min-width: 0;
+        order: 2;
+    }
+
+    #left-panel {
+        order: 1;
+    }
+
+    #right-panel {
+        order: 3;
+    }
+
+    #workspace-viewport {
+        padding: 0;
+        overflow: visible;
+    }
+
+    #workspace-split-wrapper {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+        width: 100%;
+    }
+
+    #workspace-split-wrapper>div {
+        width: 100%;
+    }
+
+    #workspace-split-wrapper img {
+        max-width: 100% !important;
+        width: 100%;
+    }
+
+    #manga-canvas-container {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    header {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    header>div:last-child {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+
+
+    #app-shell button,
+    #app-shell input,
+    #app-shell textarea,
+    #app-shell select {
+        min-height: 40px;
+    }
+
+    #app-shell input,
+    #app-shell textarea,
+    #app-shell select {
+        font-size: 16px;
+    }
+
+    #app-shell textarea {
+        line-height: 1.45;
+    }
+
+    #app-shell .text-xs {
+        line-height: 1.35;
+    }
+
+    #app-shell .p-4 {
+        padding: 0.75rem;
+    }
+
+    #app-shell .px-6 {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+
+    #app-shell .py-3 {
+        padding-top: 0.625rem;
+        padding-bottom: 0.625rem;
+    }
+}
+
+@media (max-width: 768px) {
+    header {
+        padding-top: 0.625rem;
+        padding-bottom: 0.625rem;
+    }
+
+    header h1 {
+        font-size: 0.8rem;
+    }
+
+    header p,
+    #local-mode-indicator,
+    header a {
+        font-size: 10px;
+    }
+
+    #workspace-viewport {
+        padding: 0;
+    }
+
+
+
+    #workspace-split-wrapper span,
+    #workspace-split-wrapper img {
+        max-width: 100%;
+    }
+
+    #app-shell .space-y-4>*+* {
+        margin-top: 0.75rem;
+    }
+
+    #app-shell .space-y-3>*+* {
+        margin-top: 0.6rem;
+    }
+
+    #left-panel,
+    #right-panel {
+        top: 0.5rem;
+    }
+
+    #mobile-menu-backdrop {
+        top: 0;
+    }
+}
+
+/* Hiệu ứng đàn hồi (tactile feedback) cho các nút bấm tương tác */
+button:not(:disabled) {
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:not(:disabled):hover {
+    filter: brightness(1.08);
+}
+
+button:not(:disabled):active {
+    transform: scale(0.96);
+}
+
+/* Lớp CSS cho Canvas Cọ vẽ tẩy chữ thô */
+#eraser-canvas.drawing-active {
+    cursor: crosshair;
+    pointer-events: auto !important;
+}
+
+
+
+/* Custom CSS class to reliably collapse panels on desktop */
+#left-panel.collapsed-sidebar,
+#right-panel.collapsed-sidebar {
+    display: none !important;
+}
+
+/* Fix button active scale conflict with vertical centering translateY */
+#left-sidebar-toggle-handle:active,
+#right-sidebar-toggle-handle:active {
+    transform: translateY(-50%) scale(0.95) !important;
+}
+
+/* Canvas Floating Context Toolbar */
+#canvas-floating-toolbar {
+    pointer-events: auto;
+    box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.6), 0 0 15px rgba(99, 102, 241, 0.25);
+    animation: popInFloating 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes popInFloating {
+    from {
+        opacity: 0;
+        transform: translate(-50%, 6px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0) scale(1);
+    }
+}
+
+/* Text Stroke Cross-browser Support */
+.bubble-text-span {
+    -webkit-font-smoothing: antialiased;
+    paint-order: stroke fill;
+}
+
+/* SRS Flashcard 3D Perspective & Flip Animations */
+.srs-card-perspective {
+    perspective: 1000px;
+}
+
+.srs-card-inner {
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    transform-style: preserve-3d;
+}
+
+.srs-card-flipped {
+    transform: rotateY(180deg);
+}
+
+/* Typesetting Presets Tactile Feedback */
+.preset-btn-active {
+    border-color: #6366f1 !important;
+    background-color: rgba(99, 102, 241, 0.15) !important;
+}
