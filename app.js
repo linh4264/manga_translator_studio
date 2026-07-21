@@ -2271,42 +2271,64 @@ async function getBase64(file) {
 }
 
 // Tự động phân bổ lại xuống dòng của văn bản tiếng Việt theo cấu trúc hình Diamond (bầu dục) ôm khít speech bubble
-function balanceTextToDiamond(text) {
+function balanceTextToDiamond(text, boxW, boxH) {
     const words = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim().split(' ');
     if (words.length <= 3) return words.join(' ');
 
     const wordCount = words.length;
-    let lineCounts = [];
+    let numLines = 3;
 
-    if (wordCount <= 5) {
-        lineCounts = [1, Math.max(1, wordCount - 2), 1];
-    } else if (wordCount <= 8) {
-        lineCounts = [2, wordCount - 4, 2];
-    } else if (wordCount <= 12) {
-        lineCounts = [2, 4, wordCount - 6];
+    if (boxW && boxH && boxH > 0) {
+        const aspect = boxW / boxH; // > 1 là bong bóng rộng, < 1 là bong bóng cao
+        if (aspect < 0.7) {
+            numLines = Math.min(wordCount, Math.max(3, Math.ceil(wordCount / 2.5)));
+        } else if (aspect > 1.4) {
+            numLines = Math.max(2, Math.min(4, Math.floor(wordCount / 4)));
+        } else {
+            numLines = wordCount <= 5 ? 3 : wordCount <= 10 ? 3 : 4;
+        }
     } else {
-        // Split evenly into 4 lines
-        const perLine = Math.ceil(wordCount / 4);
-        lineCounts = [perLine - 1, perLine + 1, perLine, Math.max(1, perLine - 1)];
+        if (wordCount <= 5) numLines = 3;
+        else if (wordCount <= 10) numLines = 3;
+        else if (wordCount <= 16) numLines = 4;
+        else numLines = 5;
     }
+    numLines = Math.max(2, Math.min(wordCount, numLines));
 
-    // Đảm bảo số dòng hợp lệ và khớp chính xác tổng số từ tải lên
-    lineCounts = lineCounts.filter(c => c > 0);
+    // Tính toán tỷ lệ độ rộng khả dụng từng dòng theo đường cong elip: W(y) = sqrt(1 - 4y^2)
+    let weights = [];
+    for (let i = 0; i < numLines; i++) {
+        const y = -0.5 + (i + 0.5) / numLines;
+        const widthFactor = Math.sqrt(Math.max(0.08, 1 - 4 * y * y));
+        weights.push(widthFactor);
+    }
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+
+    let lineCounts = weights.map(w => Math.max(1, Math.round((w / totalWeight) * wordCount)));
     let sum = lineCounts.reduce((a, b) => a + b, 0);
+
     while (sum < wordCount) {
-        lineCounts[Math.floor(lineCounts.length / 2)]++;
+        const mid = Math.floor(numLines / 2);
+        lineCounts[mid]++;
         sum++;
     }
     while (sum > wordCount) {
-        lineCounts[lineCounts.indexOf(Math.max(...lineCounts))]--;
-        sum--;
+        const maxIdx = lineCounts.indexOf(Math.max(...lineCounts));
+        if (lineCounts[maxIdx] > 1) {
+            lineCounts[maxIdx]--;
+            sum--;
+        } else {
+            break;
+        }
     }
 
     let resultLines = [];
     let wordIdx = 0;
     lineCounts.forEach(count => {
         const lineWords = words.slice(wordIdx, wordIdx + count);
-        resultLines.push(lineWords.join(' '));
+        if (lineWords.length > 0) {
+            resultLines.push(lineWords.join(' '));
+        }
         wordIdx += count;
     });
     return resultLines.join('\n');
@@ -2318,7 +2340,7 @@ function applyDiamondFormat() {
     const page = globalState.pages[globalState.activePageIndex];
     const block = page.blocks.find(b => b.id === globalState.selectedBlockId);
     if (block) {
-        const formatted = balanceTextToDiamond(block.translated);
+        const formatted = balanceTextToDiamond(block.translated, block.box ? block.box.w : null, block.box ? block.box.h : null);
         block.translated = formatted;
         elements.editTranslatedText.value = formatted;
         syncActiveBlockTranslation(formatted);
@@ -3102,6 +3124,7 @@ function renderOverlays(targetContainer = null, customPage = null, customImgElem
             maskContent.style.height = '100%';
             maskContent.style.display = 'flex';
             maskContent.style.alignItems = 'center';
+            maskContent.style.justifyContent = block.style.align === 'left' ? 'flex-start' : block.style.align === 'right' ? 'flex-end' : 'center';
             maskContent.className = `${block.style.fontFamily} pointer-events-none`;
         } else {
             // Chỉ che vừa khít bao quanh chữ Việt (Snug)
@@ -3205,7 +3228,8 @@ function renderOverlays(targetContainer = null, customPage = null, customImgElem
 
         // Khối văn bản dịch bên trong
         const innerTextDiv = document.createElement('div');
-        innerTextDiv.className = "w-full";
+        const isCenterAlign = !block.style.align || block.style.align === 'center';
+        innerTextDiv.className = `w-full flex flex-col ${isCenterAlign ? 'items-center justify-center' : block.style.align === 'right' ? 'items-end' : 'items-start'}`;
         innerTextDiv.style.margin = '0';
         innerTextDiv.style.padding = '0';
         innerTextDiv.style.lineHeight = block.style.vertical ? '1.12' : '1.18';
@@ -3742,7 +3766,8 @@ function autoFitBlock(block, customImgElement = null, forceExportScale = 1) {
     const canvasHeight = imgEl.clientHeight || imgEl.naturalHeight || 1200;
 
     // Tạo khoá cache dựa trên tất cả các thông số có thể làm thay đổi kích thước chữ
-    const cacheKey = `${block.translated}_${block.box.w}_${block.box.h}_${block.style.fontFamily}_${block.style.padding}_${block.style.vertical}_${block.style.bold}_${block.style.align}_${canvasWidth}_${canvasHeight}_${forceExportScale}`;
+    const maskShape = block.style.maskShape || 'bubble-fit';
+    const cacheKey = `${block.translated}_${block.box.w}_${block.box.h}_${block.style.fontFamily}_${block.style.padding}_${block.style.vertical}_${block.style.bold}_${block.style.align}_${maskShape}_${canvasWidth}_${canvasHeight}_${forceExportScale}`;
     if (block.autoFitCache && block.autoFitCache.key === cacheKey) {
         block.style.fontSize = block.autoFitCache.fontSize;
         block.textWidth = block.autoFitCache.textWidth;
@@ -3787,7 +3812,12 @@ function autoFitBlock(block, customImgElement = null, forceExportScale = 1) {
 
     const targetWidth = (block.box.w / 100) * canvasWidth;
     const targetHeight = (block.box.h / 100) * canvasHeight;
-    const fitMargin = 0.93;
+
+    // Khung hình bầu dục/elip có diện tích 4 góc hẹp hơn hình chữ nhật.
+    // Áp dụng fitMargin an toàn 0.77 đối với Ellipse/Bubble-fit và 0.93 đối với hình chữ nhật.
+    const shape = block.style.maskShape || 'bubble-fit';
+    const isEllipseShape = shape === 'ellipse' || shape === 'bubble-fit';
+    const fitMargin = isEllipseShape ? 0.77 : 0.93;
 
     // Set ruler dimensions dynamically based on layout orientation
     if (block.style.vertical) {
