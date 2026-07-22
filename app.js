@@ -3350,6 +3350,7 @@ function updateActiveBlockEditor() {
     }
 
     // Load styling variables values onto sliders controls
+    if (elements.styleAutoFit) elements.styleAutoFit.checked = !!globalState.autoFitEnabled;
     elements.styleFont.value = block.style.fontFamily;
     elements.styleFontSize.value = block.style.fontSize;
     elements.lblFontSize.innerText = `${block.style.fontSize}px`;
@@ -3698,6 +3699,24 @@ function syncActiveBlockTranslation(val) {
 
 let isCurrentlySliding = false;
 
+// Bật/tắt chế độ cỡ chữ tự động Auto-Fit
+function toggleAutoFit(enabled) {
+    globalState.autoFitEnabled = !!enabled;
+    if (elements.styleAutoFit) {
+        elements.styleAutoFit.checked = globalState.autoFitEnabled;
+    }
+    if (globalState.activePageIndex !== -1) {
+        const page = globalState.pages[globalState.activePageIndex];
+        if (page) {
+            page.blocks.forEach(b => b.autoFitCache = null);
+        }
+    }
+    requestOverlayRender();
+    updateActiveBlockEditor();
+    showToast(globalState.autoFitEnabled ? "Đã bật Cỡ chữ Tự động (Auto-Fit)" : "Đã tắt Auto-Fit (Chuyển sang chỉnh cỡ chữ thủ công)", "info");
+}
+window.toggleAutoFit = toggleAutoFit;
+
 // Sync styling parameters
 function syncActiveBlockStyle(property, value) {
     if (globalState.activePageIndex === -1 || globalState.selectedBlockId === null) return;
@@ -3705,6 +3724,12 @@ function syncActiveBlockStyle(property, value) {
     const block = page.blocks.find(b => b.id === globalState.selectedBlockId);
 
     if (block) {
+        // Nếu người dùng chủ động kéo slider Cỡ chữ thủ công, tự động tắt Auto-Fit
+        if (property === 'fontSize' && globalState.autoFitEnabled) {
+            globalState.autoFitEnabled = false;
+            if (elements.styleAutoFit) elements.styleAutoFit.checked = false;
+        }
+
         // Lưu trạng thái lịch sử trước khi chỉnh sửa
         const rangeProperties = ['fontSize', 'bgOpacity', 'padding', 'rotate'];
         if (rangeProperties.includes(property)) {
@@ -3760,14 +3785,28 @@ function autoFitBlock(block, customImgElement = null, forceExportScale = 1) {
         return;
     }
 
-    // Fetch actual canvas bounding pixel size to map relative percentages to exact sizes
     const imgEl = customImgElement || elements.mangaBgImage;
-    const canvasWidth = imgEl.clientWidth || imgEl.naturalWidth || 800;
-    const canvasHeight = imgEl.clientHeight || imgEl.naturalHeight || 1200;
 
-    // Tạo khoá cache dựa trên tất cả các thông số có thể làm thay đổi kích thước chữ
+    // Chuẩn hóa chiều rộng & chiều cao hiển thị trên giao diện (CSS Pixels)
+    let displayWidth = (imgEl && imgEl.clientWidth > 0) ? imgEl.clientWidth : 0;
+    if (!displayWidth && elements.mangaCanvasContainer && elements.mangaCanvasContainer.clientWidth > 0) {
+        displayWidth = elements.mangaCanvasContainer.clientWidth;
+    }
+    if (!displayWidth && elements.workspaceViewport && elements.workspaceViewport.clientWidth > 0) {
+        displayWidth = Math.min(elements.workspaceViewport.clientWidth - 32, 1000);
+    }
+    if (!displayWidth) {
+        displayWidth = 800; // Khung tham chiếu chuẩn theo pixel giao diện DOM
+    }
+
+    const naturalW = (imgEl && imgEl.naturalWidth > 0) ? imgEl.naturalWidth : 800;
+    const naturalH = (imgEl && imgEl.naturalHeight > 0) ? imgEl.naturalHeight : 1200;
+    const aspect = naturalH / Math.max(1, naturalW);
+    const displayHeight = displayWidth * aspect;
+
+    // Tạo khoá cache dựa trên các thông số hiển thị chuẩn CSS pixels
     const maskShape = block.style.maskShape || 'bubble-fit';
-    const cacheKey = `${block.translated}_${block.box.w}_${block.box.h}_${block.style.fontFamily}_${block.style.padding}_${block.style.vertical}_${block.style.bold}_${block.style.align}_${maskShape}_${canvasWidth}_${canvasHeight}_${forceExportScale}`;
+    const cacheKey = `${block.translated}_${block.box.w}_${block.box.h}_${block.style.fontFamily}_${block.style.padding}_${block.style.vertical}_${block.style.bold}_${block.style.align}_${maskShape}_${Math.round(displayWidth)}_${Math.round(displayHeight)}`;
     if (block.autoFitCache && block.autoFitCache.key === cacheKey) {
         block.style.fontSize = block.autoFitCache.fontSize;
         block.textWidth = block.autoFitCache.textWidth;
@@ -3781,11 +3820,10 @@ function autoFitBlock(block, customImgElement = null, forceExportScale = 1) {
         return;
     }
 
-    // Gán các thuộc tính cần thiết lên ruler toàn cục thay vì tạo div mới
+    // Gán các thuộc tính cần thiết lên ruler
     ruler.className = `${block.style.fontFamily}`;
     const padding = block.style.padding !== undefined ? block.style.padding : 4;
-    const displayPadding = forceExportScale !== 1 ? padding * forceExportScale : padding;
-    ruler.style.padding = `${displayPadding}px`;
+    ruler.style.padding = `${padding}px`;
     ruler.style.textAlign = block.style.align || 'center';
     ruler.style.letterSpacing = '0';
     ruler.style.fontKerning = 'normal';
@@ -3810,16 +3848,12 @@ function autoFitBlock(block, customImgElement = null, forceExportScale = 1) {
         ruler.style.lineHeight = '1.18';
     }
 
-    const targetWidth = (block.box.w / 100) * canvasWidth;
-    const targetHeight = (block.box.h / 100) * canvasHeight;
+    const targetWidth = (block.box.w / 100) * displayWidth;
+    const targetHeight = (block.box.h / 100) * displayHeight;
 
-    // Khung hình bầu dục/elip có diện tích 4 góc hẹp hơn hình chữ nhật.
-    // Áp dụng fitMargin an toàn 0.77 đối với Ellipse/Bubble-fit và 0.93 đối với hình chữ nhật.
-    const shape = block.style.maskShape || 'bubble-fit';
-    const isEllipseShape = shape === 'ellipse' || shape === 'bubble-fit';
+    const isEllipseShape = maskShape === 'ellipse' || maskShape === 'bubble-fit';
     const fitMargin = isEllipseShape ? 0.77 : 0.93;
 
-    // Set ruler dimensions dynamically based on layout orientation
     if (block.style.vertical) {
         ruler.style.height = `${targetHeight * fitMargin}px`;
         ruler.style.width = 'auto';
@@ -3829,8 +3863,9 @@ function autoFitBlock(block, customImgElement = null, forceExportScale = 1) {
     }
 
     let minSize = 8;
-    let maxSize = 72;
-    let optimalSize = 8;
+    let maxSize = Math.min(72, Math.floor(targetHeight * 0.85));
+    if (maxSize < minSize) maxSize = minSize;
+    let optimalSize = minSize;
 
     while (minSize <= maxSize) {
         const mid = Math.floor((minSize + maxSize) / 2);
@@ -3840,18 +3875,16 @@ function autoFitBlock(block, customImgElement = null, forceExportScale = 1) {
         const contentWidth = ruler.scrollWidth;
         const contentHeight = ruler.scrollHeight;
 
-        // Check constraints: must fit both width and height within margins (with 1px sub-pixel tolerance)
         const fits = contentWidth <= (targetWidth * fitMargin) + 1 && contentHeight <= (targetHeight * fitMargin) + 1;
 
         if (fits) {
             optimalSize = mid;
-            minSize = mid + 1; // Try larger font
+            minSize = mid + 1;
         } else {
-            maxSize = mid - 1; // Try smaller font
+            maxSize = mid - 1;
         }
     }
 
-    // Fine-tune downward if the binary search landed on a borderline value
     let probeSize = optimalSize;
     for (let i = 0; i < 2; i++) {
         ruler.style.fontSize = `${probeSize}px`;
@@ -3863,14 +3896,12 @@ function autoFitBlock(block, customImgElement = null, forceExportScale = 1) {
     const finalSize = probeSize;
     block.style.fontSize = finalSize;
 
-    // Đo lại kích thước chữ ở size font cuối cùng với padding 1px để làm lõi Bubble Fit cực sát chữ
     ruler.style.fontSize = `${finalSize}px`;
-    ruler.style.padding = '1px'; // Ép sát chữ 1px
+    ruler.style.padding = '1px';
     setMultilineText(ruler, block.translated);
     block.textWidth = ruler.scrollWidth;
     block.textHeight = ruler.scrollHeight;
 
-    // Lưu kết quả vào cache
     block.autoFitCache = {
         key: cacheKey,
         fontSize: finalSize,
@@ -4009,13 +4040,24 @@ function startBlockResize(e, block, handleDir) {
 
         block.box = { x: nextX, y: nextY, w: nextW, h: nextH };
 
-        // Realtime CSS modifications - cực kỳ nhanh, không Reflow DOM đo chữ
+        // Realtime CSS modifications - cực kỳ nhanh
         const blockElem = document.getElementById(block.id);
         if (blockElem) {
             blockElem.style.left = `${block.box.x}%`;
             blockElem.style.top = `${block.box.y}%`;
             blockElem.style.width = `${block.box.w}%`;
             blockElem.style.height = `${block.box.h}%`;
+
+            if (globalState.autoFitEnabled) {
+                block.autoFitCache = null;
+                autoFitBlock(block);
+                const maskElem = blockElem.firstElementChild;
+                if (maskElem) {
+                    maskElem.style.fontSize = `${block.style.fontSize}px`;
+                }
+                if (elements.lblFontSize) elements.lblFontSize.innerText = `${block.style.fontSize}px`;
+                if (elements.styleFontSize) elements.styleFontSize.value = block.style.fontSize;
+            }
         }
     }
 
@@ -4179,6 +4221,7 @@ async function renderPageToCanvas2D(page) {
             else if (fontClass === 'font-caveat') fontName = "'Caveat', cursive";
             else if (fontClass === 'font-tech') fontName = "'Chakra Petch', sans-serif";
             else if (fontClass === 'font-condensed') fontName = "'Saira Condensed', sans-serif";
+            else if (fontClass && !fontClass.startsWith('font-')) fontName = `'${fontClass}', sans-serif`;
 
             // Tỉ lệ quy đổi font size theo độ phân giải gốc của ảnh
             const displayWidth = elements.mangaBgImage.clientWidth || 800;
@@ -4204,8 +4247,46 @@ async function renderPageToCanvas2D(page) {
             if (block.style.align === 'left') startX = bx + paddingPx;
             else if (block.style.align === 'right') startX = bx + bw - paddingPx;
 
+            // Nét viền chữ (Text Stroke) & Bóng đổ (Drop Shadow)
+            const strokeWidth = parseFloat(block.style.strokeWidth) || 0;
+            const strokeColor = block.style.strokeColor || '#ffffff';
+            const strokeWidthPx = strokeWidth * scaleFactor;
+
+            const shadowBlur = parseFloat(block.style.shadowBlur) || 0;
+            const shadowColor = block.style.shadowColor || '#000000';
+            const shadowBlurPx = shadowBlur * scaleFactor;
+
             for (let i = 0; i < textLines.length; i++) {
-                ctx.fillText(textLines[i], startX, startY + (i * lineHeight));
+                const lineText = textLines[i];
+                const lineY = startY + (i * lineHeight);
+
+                // Vẽ viền chữ (Stroke) nếu strokeWidth > 0
+                if (strokeWidth > 0) {
+                    ctx.save();
+                    if (shadowBlur > 0) {
+                        ctx.shadowColor = shadowColor;
+                        ctx.shadowBlur = shadowBlurPx;
+                        ctx.shadowOffsetX = 0;
+                        ctx.shadowOffsetY = 0;
+                    }
+                    ctx.lineWidth = strokeWidthPx * 2;
+                    ctx.strokeStyle = strokeColor;
+                    ctx.lineJoin = 'round';
+                    ctx.miterLimit = 2;
+                    ctx.strokeText(lineText, startX, lineY);
+                    ctx.restore();
+                }
+
+                // Vẽ nội dung chữ (Fill)
+                ctx.save();
+                if (strokeWidth === 0 && shadowBlur > 0) {
+                    ctx.shadowColor = shadowColor;
+                    ctx.shadowBlur = shadowBlurPx;
+                    ctx.shadowOffsetX = 0;
+                    ctx.shadowOffsetY = 0;
+                }
+                ctx.fillText(lineText, startX, lineY);
+                ctx.restore();
             }
 
             ctx.restore();
