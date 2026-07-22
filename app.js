@@ -402,6 +402,10 @@ const MAX_HISTORY_LIMIT = 30;
 
 let globalState = {
     apiKey: '',
+    aiProvider: 'gemini', // 'gemini' | 'claude' | 'openai' | 'custom'
+    apiEndpoint: 'http://localhost:11434/v1', // Base URL for custom/local LLM
+    chapterStoryMemory: [], // Multi-page dialogue and character tone memory
+    enableStoryMemory: true, // Toggle story context accumulation
     selectedModel: DEFAULT_MODEL,
     pages: [],
     activePageIndex: -1,
@@ -1308,6 +1312,260 @@ function updateMaxRetries(value) {
 }
 window.updateMaxRetries = updateMaxRetries;
 
+// --- NHÓM 1: MULTI-PROVIDER AI, STORY MEMORY, SFX & AUTO CLEAN ---
+
+function updateAiProvider(provider) {
+    globalState.aiProvider = provider || 'gemini';
+    localStorage.setItem('manga_ai_provider', globalState.aiProvider);
+
+    const endpointContainer = document.getElementById('api-endpoint-container');
+    const apiKeyLabel = document.getElementById('api-key-label');
+    const modelSelect = document.getElementById('model-select');
+
+    if (endpointContainer) {
+        if (provider === 'custom') {
+            endpointContainer.classList.remove('hidden');
+        } else {
+            endpointContainer.classList.add('hidden');
+        }
+    }
+
+    if (apiKeyLabel) {
+        if (provider === 'gemini') apiKeyLabel.textContent = 'Gemini API Key';
+        else if (provider === 'claude') apiKeyLabel.textContent = 'Anthropic Claude API Key';
+        else if (provider === 'openai') apiKeyLabel.textContent = 'OpenAI API Key';
+        else if (provider === 'custom') apiKeyLabel.textContent = 'API Key (Tùy chọn cho Local LLM)';
+    }
+
+    if (modelSelect) {
+        modelSelect.innerHTML = '';
+        let options = [];
+        if (provider === 'gemini') {
+            options = [
+                { value: 'gemini-3.5-flash', text: 'Gemini 3.5 Flash (Mới nhất)' },
+                { value: 'gemini-3-flash-preview', text: 'Gemini 3 Flash Preview' },
+                { value: 'gemini-3.1-flash-lite', text: 'Gemini 3.1 Flash-Lite (Khuyến nghị)', selected: true },
+                { value: 'gemini-3.1-pro-preview', text: 'Gemini 3.1 Pro Preview (Chuyên sâu)' },
+                { value: 'gemini-2.5-flash', text: 'Gemini 2.5 Flash' },
+                { value: 'gemini-2.5-pro', text: 'Gemini 2.5 Pro' },
+                { value: '__custom__', text: 'Tự nhập model...' }
+            ];
+        } else if (provider === 'claude') {
+            options = [
+                { value: 'claude-3-7-sonnet-20250219', text: 'Claude 3.7 Sonnet (Dịch xuất sắc)', selected: true },
+                { value: 'claude-3-5-sonnet-20241022', text: 'Claude 3.5 Sonnet' },
+                { value: 'claude-3-5-haiku-20241022', text: 'Claude 3.5 Haiku (Nhanh)' },
+                { value: '__custom__', text: 'Tự nhập model...' }
+            ];
+        } else if (provider === 'openai') {
+            options = [
+                { value: 'gpt-4o', text: 'GPT-4o (Vision cao cấp)', selected: true },
+                { value: 'gpt-4o-mini', text: 'GPT-4o Mini (Tiết kiệm)' },
+                { value: 'o3-mini', text: 'o3-mini Reasoning' },
+                { value: '__custom__', text: 'Tự nhập model...' }
+            ];
+        } else if (provider === 'custom') {
+            options = [
+                { value: 'qwen2.5-vl', text: 'Qwen 2.5 VL (Local Vision)', selected: true },
+                { value: 'llama3.2-vision', text: 'Llama 3.2 Vision' },
+                { value: 'llava', text: 'LLaVA (Ollama)' },
+                { value: '__custom__', text: 'Tự nhập model...' }
+            ];
+        }
+
+        options.forEach(opt => {
+            const el = document.createElement('option');
+            el.value = opt.value;
+            el.textContent = opt.text;
+            if (opt.selected) el.selected = true;
+            modelSelect.appendChild(el);
+        });
+
+        globalState.selectedModel = modelSelect.value;
+    }
+    showToast(`Đã chuyển nhà cung cấp AI sang: ${provider.toUpperCase()}`, 'info');
+}
+window.updateAiProvider = updateAiProvider;
+
+function updateApiEndpoint(val) {
+    globalState.apiEndpoint = val.trim() || 'http://localhost:11434/v1';
+    localStorage.setItem('manga_api_endpoint', globalState.apiEndpoint);
+}
+window.updateApiEndpoint = updateApiEndpoint;
+
+function toggleStoryMemory(enabled) {
+    globalState.enableStoryMemory = Boolean(enabled);
+    localStorage.setItem('manga_enable_story_memory', JSON.stringify(globalState.enableStoryMemory));
+    showToast(enabled ? 'Đã bật Bộ nhớ ngữ cảnh chương' : 'Đã tắt Bộ nhớ ngữ cảnh chương', 'info');
+}
+window.toggleStoryMemory = toggleStoryMemory;
+
+function updateStoryMemoryBadge() {
+    const badge = document.getElementById('story-memory-badge');
+    if (badge) {
+        const count = (globalState.chapterStoryMemory || []).length;
+        badge.textContent = `${count} trang`;
+    }
+}
+
+function clearStoryMemory() {
+    globalState.chapterStoryMemory = [];
+    localStorage.removeItem('manga_chapter_story_memory');
+    updateStoryMemoryBadge();
+    showToast('Đã xóa bộ nhớ ngữ cảnh chương.', 'success');
+}
+window.clearStoryMemory = clearStoryMemory;
+
+function recordPageToStoryMemory(pageIndex, blocks) {
+    if (!blocks || !blocks.length || !globalState.enableStoryMemory) return;
+    const translatedLines = blocks.map(b => `${b.original} -> ${b.translated}`).filter(Boolean);
+    if (!translatedLines.length) return;
+
+    const summary = {
+        pageIndex: pageIndex + 1,
+        dialogueCount: blocks.length,
+        excerpt: translatedLines.slice(0, 4).join('; ')
+    };
+
+    if (!globalState.chapterStoryMemory) globalState.chapterStoryMemory = [];
+    globalState.chapterStoryMemory = globalState.chapterStoryMemory.filter(m => m.pageIndex !== summary.pageIndex);
+    globalState.chapterStoryMemory.push(summary);
+    if (globalState.chapterStoryMemory.length > 10) {
+        globalState.chapterStoryMemory.shift();
+    }
+    updateStoryMemoryBadge();
+}
+
+function viewStoryMemoryModal() {
+    const memories = globalState.chapterStoryMemory || [];
+    if (!memories.length) {
+        showToast('Bộ nhớ ngữ cảnh hiện đang trống. Hãy dịch vài trang để tích lũy ngữ cảnh!', 'info');
+        return;
+    }
+    const lines = memories.map(m => `Trang ${m.pageIndex}: ${m.excerpt}`);
+    alert(`📖 BỘ NHỚ NGỮ CẢNH CHƯƠNG TRUYỆN (${memories.length} trang đã lưu):\n\n` + lines.join('\n\n'));
+}
+window.viewStoryMemoryModal = viewStoryMemoryModal;
+
+function autoCleanBubbleBackground(page, block) {
+    if (!page || !block) {
+        showToast('Không tìm thấy thông tin ô thoại để xóa chữ.', 'warn');
+        return false;
+    }
+
+    const canvas = document.getElementById('eraser-canvas');
+    if (!canvas) return false;
+
+    const ctx = canvas.getContext('2d');
+    const bx = Math.round((block.box.x / 100) * canvas.width);
+    const by = Math.round((block.box.y / 100) * canvas.height);
+    const bw = Math.round((block.box.w / 100) * canvas.width);
+    const bh = Math.round((block.box.h / 100) * canvas.height);
+
+    ctx.save();
+    ctx.fillStyle = block.style?.bgColor || '#ffffff';
+    ctx.beginPath();
+    ctx.ellipse(bx + bw / 2, by + bh / 2, bw / 2, bh / 2, 0, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore();
+
+    return true;
+}
+
+function autoCleanActiveBlock() {
+    const activePage = globalState.pages[globalState.activePageIndex];
+    if (!activePage || !globalState.selectedBlockId) {
+        showToast('Hãy nhấp chọn một khung thoại để dùng cọ xóa chữ AI.', 'warn');
+        return;
+    }
+    const block = activePage.blocks.find(b => b.id === globalState.selectedBlockId);
+    if (block) {
+        pushStateToHistory();
+        block.style.maskShape = 'bubble-fit';
+        block.style.maskSize = 'full';
+        block.style.bgOpacity = 100;
+        autoCleanBubbleBackground(activePage, block);
+        requestOverlayRender();
+        showToast(`🧹 Đã tự động phủ xóa chữ cũ cho khung thoại #${block.id.slice(-4)}`, 'success');
+    }
+}
+window.autoCleanActiveBlock = autoCleanActiveBlock;
+
+function setActiveBlockType(type) {
+    const activePage = globalState.pages[globalState.activePageIndex];
+    if (!activePage || !globalState.selectedBlockId) return;
+    const block = activePage.blocks.find(b => b.id === globalState.selectedBlockId);
+    if (!block) return;
+
+    pushStateToHistory();
+    block.type = type;
+
+    if (type === 'sfx') {
+        block.style.fontFamily = 'font-impact';
+        block.style.bold = true;
+        // Bỏ gán màu chữ đỏ mặc định theo yêu cầu người dùng (giữ nguyên màu chữ hiện tại)
+        if (!block.style.strokeWidth) {
+            block.style.strokeColor = '#ffffff';
+            block.style.strokeWidth = 2;
+        }
+    } else {
+        // Khôi phục về dạng 💬 Lời thoại (Dialogue)
+        block.style.fontFamily = globalState.globalStyle.fontFamily || 'font-comic';
+        block.style.bold = false;
+        block.style.rotate = 0;
+        block.style.arcAngle = 0;
+        block.style.strokeWidth = 0;
+    }
+
+    // Xóa bộ nhớ cache để canvas render đúng style mới ngay lập tức
+    block.maskCache = null;
+    block.autoFitCache = null;
+
+    updateActiveBlockEditor();
+    requestOverlayRender();
+    savePageToDB(activePage);
+    showToast(`Đã chuyển loại ô thoại sang: ${type === 'sfx' ? '💥 SFX Hiệu ứng' : '💬 Lời thoại'}`, 'info');
+}
+window.setActiveBlockType = setActiveBlockType;
+
+function updateSfxRotate(val) {
+    const angle = parseInt(val, 10) || 0;
+    const activePage = globalState.pages[globalState.activePageIndex];
+    if (!activePage || !globalState.selectedBlockId) return;
+    const block = activePage.blocks.find(b => b.id === globalState.selectedBlockId);
+    if (!block) return;
+
+    block.style.rotate = angle;
+    const lbl = document.getElementById('lbl-sfx-rotate');
+    if (lbl) lbl.textContent = `${angle}°`;
+    requestOverlayRender();
+}
+window.updateSfxRotate = updateSfxRotate;
+
+function updateSfxArc(val) {
+    const arc = parseInt(val, 10) || 0;
+    const activePage = globalState.pages[globalState.activePageIndex];
+    if (!activePage || !globalState.selectedBlockId) return;
+    const block = activePage.blocks.find(b => b.id === globalState.selectedBlockId);
+    if (!block) return;
+
+    block.style.arcAngle = arc;
+    const lbl = document.getElementById('lbl-sfx-arc');
+    if (lbl) lbl.textContent = `${arc}°`;
+    requestOverlayRender();
+}
+window.updateSfxArc = updateSfxArc;
+
+function resetSfxAngleControls() {
+    updateSfxRotate(0);
+    updateSfxArc(0);
+    const rSlider = document.getElementById('slider-sfx-rotate');
+    const aSlider = document.getElementById('slider-sfx-arc');
+    if (rSlider) rSlider.value = 0;
+    if (aSlider) aSlider.value = 0;
+}
+window.resetSfxAngleControls = resetSfxAngleControls;
+
 function getTranslationGuidancePrompt() {
     const guidanceParts = [];
     const customContextPrompt = globalState.translationContextPrompt.trim();
@@ -1346,6 +1604,11 @@ function getTranslationGuidancePrompt() {
     }
     if (customContextPrompt) {
         guidanceParts.push(`- USER CONTEXT / TRANSLATION GUIDANCE: ${customContextPrompt}`);
+    }
+
+    if (globalState.enableStoryMemory && (globalState.chapterStoryMemory || []).length > 0) {
+        const memoryText = globalState.chapterStoryMemory.map(m => `Trang ${m.pageIndex}: ${m.excerpt}`).join('; ');
+        guidanceParts.push(`- CHAPTER STORY MEMORY (PREVIOUS PAGES CONTEXT): Here is the recent dialogue history from earlier pages in this chapter: ${memoryText}. Reuse the exact same character pronouns (xưng hô), names, and overall tone to ensure continuity.`);
     }
 
     guidanceParts.push(
@@ -2701,6 +2964,7 @@ window.enhanceImageForOcr = enhanceImageForOcr;
             });
 
             page.status = 'done';
+            recordPageToStoryMemory(pageIndex, page.blocks);
             updatePageListUI();
             savePageToDB(page);
 
@@ -3339,6 +3603,34 @@ function updateActiveBlockEditor() {
     elements.editOriginalText.value = block.original;
     elements.editTranslatedText.value = block.translated;
     elements.lblBlockId.innerText = block.id;
+
+    // Sync Box Type Buttons (Dialogue / SFX)
+    const btnDialogue = document.getElementById('btn-block-type-dialogue');
+    const btnSfx = document.getElementById('btn-block-type-sfx');
+    const blockType = block.type || 'dialogue';
+    if (btnDialogue && btnSfx) {
+        if (blockType === 'sfx') {
+            btnSfx.className = 'py-1.5 px-2 text-[11px] font-semibold rounded bg-amber-600 text-white flex items-center justify-center gap-1.5 transition-all';
+            btnDialogue.className = 'py-1.5 px-2 text-[11px] font-semibold rounded text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1.5 transition-all';
+        } else {
+            btnDialogue.className = 'py-1.5 px-2 text-[11px] font-semibold rounded bg-indigo-600 text-white flex items-center justify-center gap-1.5 transition-all';
+            btnSfx.className = 'py-1.5 px-2 text-[11px] font-semibold rounded text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1.5 transition-all';
+        }
+    }
+
+    // Sync SFX Rotation & Arc Angle Sliders
+    const sfxRotateSlider = document.getElementById('slider-sfx-rotate');
+    const sfxRotateLbl = document.getElementById('lbl-sfx-rotate');
+    const sfxArcSlider = document.getElementById('slider-sfx-arc');
+    const sfxArcLbl = document.getElementById('lbl-sfx-arc');
+
+    const currentRotate = block.style.rotate || 0;
+    const currentArc = block.style.arcAngle || 0;
+
+    if (sfxRotateSlider) sfxRotateSlider.value = currentRotate;
+    if (sfxRotateLbl) sfxRotateLbl.textContent = `${currentRotate}°`;
+    if (sfxArcSlider) sfxArcSlider.value = currentArc;
+    if (sfxArcLbl) sfxArcLbl.textContent = `${currentArc}°`;
 
     const btnSfxRestore = document.getElementById('btn-sfx-restore');
     if (btnSfxRestore) {

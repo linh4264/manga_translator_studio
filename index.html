@@ -66,7 +66,7 @@
         <!-- LEFT PANEL: Batch Manager & Config -->
         <aside id="left-panel" class="w-80 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 min-h-0">
             <!-- Section: Controls & Batch Config -->
-            <div class="p-4 border-b border-slate-800 space-y-4">
+            <div class="p-4 border-b border-slate-800 space-y-4 overflow-y-auto max-h-[55vh] shrink-0 custom-scrollbar">
                 <div class="flex items-center justify-between gap-3">
                     <div class="min-w-0">
                         <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nguồn ảnh</p>
@@ -87,7 +87,7 @@
                     </div>
                 </div>
 
-                <!-- API Key & Model Selection Input -->
+                <!-- API Key & Multi-Provider Selection Input -->
                 <div id="api-settings-section" class="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-3">
                     <!-- Local Mode Indicator -->
                     <div id="local-mode-indicator"
@@ -95,9 +95,33 @@
                         <i class="fa-solid fa-triangle-exclamation animate-bounce"></i>
                         <span>Chạy Cục Bộ (Yêu cầu API Key cá nhân)</span>
                     </div>
+
+                    <!-- AI Provider Selector -->
                     <div class="space-y-1">
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Gemini API
-                            Key</label>
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                            <span>Nhà cung cấp AI (Provider)</span>
+                            <span class="text-[9px] text-indigo-400 font-normal"><i class="fa-solid fa-microchip"></i> Đa mô hình</span>
+                        </label>
+                        <select id="ai-provider-select" onchange="updateAiProvider(this.value)"
+                            class="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors">
+                            <option value="gemini" selected>Google Gemini API (Khuyên dùng)</option>
+                            <option value="claude">Anthropic Claude API</option>
+                            <option value="openai">OpenAI API (GPT-4o)</option>
+                            <option value="custom">Custom / Local LLM (Ollama, LM Studio)</option>
+                        </select>
+                    </div>
+
+                    <!-- API Endpoint Base URL (for Custom / Local LLM) -->
+                    <div id="api-endpoint-container" class="hidden space-y-1">
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">API Endpoint Base URL</label>
+                        <input type="text" id="api-endpoint-input" onchange="updateApiEndpoint(this.value)"
+                            placeholder="http://localhost:11434/v1"
+                            class="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors">
+                        <p class="text-[9px] text-slate-500 leading-relaxed">Ví dụ: Ollama: http://localhost:11434/v1 | LM Studio: http://localhost:1234/v1</p>
+                    </div>
+
+                    <div class="space-y-1">
+                        <label id="api-key-label" class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Gemini API Key</label>
                         <div class="relative">
                             <input type="password" id="api-key-input" placeholder="Tự động sử dụng key của hệ thống..."
                                 class="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors pr-8">
@@ -111,8 +135,7 @@
                     <!-- Dynamic Model Selector with Smart Locking & New Generation Models -->
                     <div class="space-y-1">
                         <div class="flex justify-between items-center">
-                            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Mô hình
-                                AI (Model)</label>
+                            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Mô hình AI (Model)</label>
                             <span id="model-lock-badge"
                                 class="text-[9px] text-indigo-400 font-bold bg-indigo-500/10 px-1.5 py-0.5 rounded flex items-center gap-1">
                                 <i class="fa-solid fa-lock"></i> Hệ thống
@@ -120,7 +143,7 @@
                         </div>
                         <select id="model-select" onchange="updateSelectedModel(this.value)"
                             class="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 transition-colors">
-                            <!-- Current text-output multimodal Gemini API models -->
+                            <!-- Options updated dynamically by updateAiProvider -->
                             <option value="gemini-3.5-flash">Gemini 3.5 Flash (Mới nhất)</option>
                             <option value="gemini-3-flash-preview">Gemini 3 Flash Preview (mạnh, preview)</option>
                             <option value="gemini-3.1-flash-lite" selected>Gemini 3.1 Flash-Lite (Khuyến nghị, nhanh/tiết kiệm)</option>
@@ -289,7 +312,27 @@
                             thống để AI hiểu bối cảnh, văn phong và quy ước dịch của bạn.</p>
                     </div>
 
-                    <!-- API Rate Limiting Configuration -->
+                    <!-- Chapter Story Memory Configuration -->
+                    <div class="pt-2 border-t border-slate-800/70 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <h4 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <i class="fa-solid fa-brain text-purple-400"></i> Bộ nhớ ngữ cảnh chương
+                            </h4>
+                            <span id="story-memory-badge" class="text-[9px] bg-purple-500/10 text-purple-300 font-semibold px-1.5 py-0.5 rounded">0 trang</span>
+                        </div>
+                        <label class="flex items-start space-x-2 cursor-pointer">
+                            <input type="checkbox" id="story-memory-chk" onchange="toggleStoryMemory(this.checked)" checked
+                                class="mt-0.5 rounded border-slate-800 text-purple-600 focus:ring-0">
+                            <div class="text-[11px]">
+                                <span class="font-semibold text-slate-200">Tự động nối ngữ cảnh các trang trước</span>
+                                <p class="text-[10px] text-slate-500 mt-0.5">Tích lũy tóm tắt xưng hô & cốt truyện từ trang 1 đến trang cuối để dịch nhất quán.</p>
+                            </div>
+                        </label>
+                        <div class="flex items-center justify-between text-[10px]">
+                            <button onclick="viewStoryMemoryModal()" class="text-indigo-400 hover:text-indigo-300 font-medium">Xem bộ nhớ...</button>
+                            <button onclick="clearStoryMemory()" class="text-red-400 hover:text-red-300 font-medium"><i class="fa-solid fa-trash-can text-[9px]"></i> Xóa bộ nhớ</button>
+                        </div>
+                    </div>
                     <div class="pt-2 border-t border-slate-800/70 space-y-2">
                         <h4 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                             <i class="fa-solid fa-clock text-amber-500"></i> Giới hạn tần suất API (Tránh lỗi 429/503)
@@ -663,13 +706,26 @@
                 </div>
 
                 <div id="block-editor-container" class="hidden space-y-4">
+                    <!-- Block Type Selector -->
+                    <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Phân loại khung thoại</label>
+                        <div class="grid grid-cols-2 gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                            <button id="btn-block-type-dialogue" onclick="setActiveBlockType('dialogue')"
+                                class="py-1.5 px-2 text-[11px] font-semibold rounded bg-indigo-600 text-white flex items-center justify-center gap-1.5 transition-all">
+                                <i class="fa-regular fa-comment"></i> 💬 Lời thoại
+                            </button>
+                            <button id="btn-block-type-sfx" onclick="setActiveBlockType('sfx')"
+                                class="py-1.5 px-2 text-[11px] font-semibold rounded text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1.5 transition-all">
+                                <i class="fa-solid fa-bolt"></i> 💥 Hiệu ứng (SFX)
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Text Area Original JP -->
                     <div class="space-y-1.5">
                         <div class="flex items-center justify-between">
-                            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Chữ gốc
-                                (OCR)</label>
-                            <span
-                                class="text-[9px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">Original</span>
+                            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Chữ gốc (OCR)</label>
+                            <span class="text-[9px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">Original</span>
                         </div>
                         <textarea id="edit-original-text" rows="3"
                             class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 transition-colors"
@@ -679,26 +735,53 @@
                     <!-- Text Area Translated VN -->
                     <div class="space-y-1.5">
                         <div class="flex items-center justify-between">
-                            <label class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Bản dịch tiếng
-                                Việt</label>
-                            <span
-                                class="text-[9px] bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded font-mono">Translated</span>
+                            <label class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Bản dịch tiếng Việt</label>
+                            <span class="text-[9px] bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded font-mono">Translated</span>
                         </div>
                         <textarea id="edit-translated-text" oninput="syncActiveBlockTranslation(this.value)" rows="4"
                             class="w-full bg-slate-950 border border-indigo-500/20 focus:border-indigo-500 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none transition-colors"
                             placeholder="Nhập bản dịch tiếng Việt..."></textarea>
 
-                        <div class="flex items-center gap-2 mt-2">
+                        <div class="flex flex-wrap items-center gap-2 mt-2">
                             <!-- Smart Manga Diamond Balance Button -->
                             <button onclick="applyDiamondFormat()"
                                 class="text-[10px] bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-400 hover:text-white px-2 py-1 rounded transition-all font-semibold flex items-center gap-1.5">
-                                <i class="fa-solid fa-gem"></i> ⚡ Cân đối Diamond
+                                <i class="fa-solid fa-gem"></i> ⚡ Diamond
+                            </button>
+                            <!-- Auto Clean Text AI Button -->
+                            <button onclick="autoCleanActiveBlock()"
+                                class="text-[10px] bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/30 text-emerald-300 hover:text-white px-2 py-1 rounded transition-all font-semibold flex items-center gap-1.5" title="Tự động xóa vết chữ gốc bằng thuật toán AI Edge Fill">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> 🧹 Xóa chữ AI
                             </button>
                             <!-- TOEIC analysis quick button -->
                             <button onclick="quickOpenToeicAnalysis()"
                                 class="text-[10px] bg-amber-600/20 hover:bg-amber-600 border border-amber-500/30 text-amber-400 hover:text-white px-2 py-1 rounded transition-all font-semibold flex items-center gap-1.5">
-                                <i class="fa-solid fa-graduation-cap"></i> Học TOEIC
+                                <i class="fa-solid fa-graduation-cap"></i> TOEIC
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- SFX Angle & Arc Slider Controls -->
+                    <div id="sfx-controls-container" class="space-y-3 p-3 bg-slate-950 rounded-lg border border-slate-800">
+                        <h4 class="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center justify-between">
+                            <span><i class="fa-solid fa-arrows-spin"></i> Góc xoay & Uốn cong (SFX)</span>
+                            <button onclick="resetSfxAngleControls()" class="text-[9px] text-slate-400 hover:text-white font-normal">Đặt lại</button>
+                        </h4>
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[10px] text-slate-400">
+                                <span>Góc nghiêng (Rotation):</span>
+                                <span id="lbl-sfx-rotate" class="font-mono text-slate-200">0°</span>
+                            </div>
+                            <input type="range" id="slider-sfx-rotate" min="-180" max="180" value="0" oninput="updateSfxRotate(this.value)"
+                                class="w-full accent-amber-500 bg-slate-900 h-1.5 rounded cursor-pointer">
+                        </div>
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[10px] text-slate-400">
+                                <span>Độ uốn cong (Arc Text):</span>
+                                <span id="lbl-sfx-arc" class="font-mono text-slate-200">0°</span>
+                            </div>
+                            <input type="range" id="slider-sfx-arc" min="0" max="360" value="0" oninput="updateSfxArc(this.value)"
+                                class="w-full accent-indigo-500 bg-slate-900 h-1.5 rounded cursor-pointer">
                         </div>
                     </div>
 

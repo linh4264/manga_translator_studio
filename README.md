@@ -10,9 +10,14 @@
 
 ## ✨ Tính năng nổi bật
 
-- 🤖 **Nhận diện & Dịch AI thông minh (OCR & AI Translation)**:
-  - Tự động phát hiện vị trí bong bóng thoại và đọc chữ đa ngôn ngữ (Nhật, Trung, Hàn, Anh...).
-  - Dịch tự nhiên, sát ngữ cảnh, giữ nguyên cảm xúc và phong cách riêng của từng thể loại.
+- 🤖 **Hỗ trợ Đa Nhà Cung Cấp AI (Multi-Provider AI & Local LLM)**:
+  - Tích hợp **Google Gemini**, **Anthropic Claude** (Claude 3.7/3.5 Sonnet), **OpenAI** (GPT-4o), và **Custom Local LLM** (Ollama: `http://localhost:11434/v1`, LM Studio: `http://localhost:1234/v1`).
+- 🧠 **Bộ nhớ ngữ cảnh chương (Chapter Story Memory)**:
+  - Tự động nối kết quả xưng hô & tóm tắt diễn biến giữa các trang liền kề giúp AI dịch nhất quán giọng văn từ trang 1 đến hết chương.
+- 🧹 **Tự động Xóa chữ AI (Auto Clean Text & Inpainting)**:
+  - Nút **🧹 Xóa chữ AI** tự động phủ nền bong bóng thoại mượt mà mà không làm mất viền contour hay họa tiết gốc.
+- 💥 **Bộ công cụ SFX chuyên sâu (Sound Effects & Curved Text)**:
+  - Phân loại khung thoại (`Lời thoại` / `💥 SFX Hiệu ứng`), chỉnh góc xoay (`Rotation Slider: -180° đến 180°`), uốn cong chữ (`Arc Text Angle`) và hiệu ứng viền/bóng chữ.
 - 🎨 **Bộ công cụ Typeset & Canvas chuyên sâu**:
   - Tự động canh chỉnh kích thước phông chữ (Auto-fit font size) vừa khít khung thoại.
   - Hỗ trợ viết chữ ngang và chữ dọc (Vertical Text) cho manga truyền thống.
