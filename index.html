@@ -87,6 +87,20 @@
                     </div>
                 </div>
 
+                <!-- Speed Productivity Bar (Công cụ chỉnh sửa siêu tốc độ) -->
+                <div class="grid grid-cols-2 gap-1.5 p-2 bg-slate-950 rounded-lg border border-slate-800">
+                    <button onclick="openFindReplaceModal()"
+                        class="py-1.5 px-2 rounded bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-300 hover:text-white text-[10px] font-semibold flex items-center justify-center gap-1.5 transition-all"
+                        title="Tìm & Thay thế từ ngữ hoặc từ xưng hô trên TOÀN BỘ các trang trong 1 giây">
+                        <i class="fa-solid fa-magnifying-glass-arrow-right text-indigo-400"></i> Tìm & Thay thế
+                    </button>
+                    <button onclick="batchDiamondBalanceAllPages()"
+                        class="py-1.5 px-2 rounded bg-purple-600/20 hover:bg-purple-600 border border-purple-500/30 text-purple-300 hover:text-white text-[10px] font-semibold flex items-center justify-center gap-1.5 transition-all"
+                        title="Tự động cân đối bố cục Diamond cho tất cả ô thoại trên toàn chương trong 1 click">
+                        <i class="fa-solid fa-gem text-purple-400"></i> Cân đối Diamond
+                    </button>
+                </div>
+
                 <!-- API Key & Multi-Provider Selection Input -->
                 <div id="api-settings-section" class="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-3">
                     <!-- Local Mode Indicator -->
@@ -200,12 +214,15 @@
                     </div>
 
                     <div class="space-y-1">
-                        <label class="block text-[10px] font-semibold text-slate-400">Ma trận xưng hô nhân vật (Pronoun Matrix):</label>
+                        <div class="flex items-center justify-between">
+                            <label class="block text-[10px] font-semibold text-slate-400">Ma trận xưng hô nhân vật (Pronoun Matrix):</label>
+                            <button onclick="loadSamplePronounMatrix()" class="text-[9px] text-indigo-400 hover:text-indigo-300 font-semibold">⚡ Nạp mẫu thử</button>
+                        </div>
                         <textarea id="pronoun-matrix-input" oninput="updatePronounMatrix(this.value)"
-                            rows="2"
-                            placeholder="Ví dụ: Luffy -> Zoro: cậu - tớ; Zoro -> Nami: cô - tôi; Naruto -> Sasuke: cậu - tớ"
+                            rows="3"
+                            placeholder="Cú pháp: NgườiNói -> NgườiNghe: TôiXưng - TôiGọiTarget&#10;Ví dụ: Luffy -> Zoro: tớ - cậu; Zoro -> Luffy: tôi - cậu; Nami -> Luffy: tôi - tên ngốc"
                             class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-600 resize-y"></textarea>
-                        <p class="text-[10px] text-slate-500 leading-relaxed">Quy định cặp từ xưng hô 2 chiều để Gemini giữ giọng xưng nhất quán xuyên suốt.</p>
+                        <p class="text-[10px] text-slate-500 leading-relaxed">Cú pháp: <code class="text-indigo-300">TênA -> TênB: Xưng_A - Gọi_B</code>. AI sẽ phân tích đuôi thoại để gán đúng nhân vật nói.</p>
                     </div>
 
                     <label class="flex items-start space-x-2 cursor-pointer pt-1 border-t border-slate-800/70">
@@ -718,6 +735,30 @@
                                 class="py-1.5 px-2 text-[11px] font-semibold rounded text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1.5 transition-all">
                                 <i class="fa-solid fa-bolt"></i> 💥 Hiệu ứng (SFX)
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- Character Speaker & Target Attribution -->
+                    <div class="p-2.5 bg-slate-950 rounded-lg border border-slate-800 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <label class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1">
+                                <i class="fa-solid fa-users"></i> Nhân vật giao tiếp
+                            </label>
+                            <button onclick="applyPronounMatrixToActiveBlock()" class="text-[9px] bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-300 hover:text-white px-2 py-0.5 rounded font-semibold transition-all">
+                                ⚡ Ép xưng hô
+                            </button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div class="space-y-1">
+                                <label class="block text-[9px] text-slate-400">Người nói (Speaker):</label>
+                                <input type="text" id="edit-block-speaker" oninput="updateActiveBlockCharacters()" placeholder="Luffy..."
+                                    class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="block text-[9px] text-slate-400">Người nghe (Target):</label>
+                                <input type="text" id="edit-block-target" oninput="updateActiveBlockCharacters()" placeholder="Zoro..."
+                                    class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors">
+                            </div>
                         </div>
                     </div>
 
@@ -1352,6 +1393,48 @@
     </div>
 
     <!-- NON-BLOCKING BACKGROUND TASK MANAGER (Góc dưới bên trái, tránh đè Toast bên phải) -->
+    <!-- Chapter-Wide Find & Replace Modal -->
+    <div id="find-replace-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4" onclick="closeFindReplaceModal()">
+        <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden p-5 space-y-4" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                        <i class="fa-solid fa-magnifying-glass-arrow-right"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Tìm & Thay thế toàn bộ chương</h3>
+                        <p class="text-[10px] text-slate-500">Thay đổi hàng loạt từ ngữ/xưng hô trên tất cả các trang</p>
+                    </div>
+                </div>
+                <button onclick="closeFindReplaceModal()" class="w-8 h-8 rounded hover:bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="space-y-3 text-xs">
+                <div class="space-y-1">
+                    <label class="block font-semibold text-slate-400">Từ / cụm từ cần tìm:</label>
+                    <input type="text" id="find-input" placeholder="Ví dụ: tôi" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div class="space-y-1">
+                    <label class="block font-semibold text-slate-400">Thay bằng:</label>
+                    <input type="text" id="replace-input" placeholder="Ví dụ: tớ" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div class="flex items-center justify-between pt-1">
+                    <label class="flex items-center gap-2 cursor-pointer text-slate-400">
+                        <input type="checkbox" id="match-case-chk" class="rounded border-slate-800 text-indigo-600 focus:ring-0">
+                        <span>Phân biệt chữ HOA / thường</span>
+                    </label>
+                    <span id="find-replace-result-badge" class="text-[10px] text-indigo-400 font-semibold"></span>
+                </div>
+            </div>
+            <div class="flex gap-2 pt-2 border-t border-slate-800">
+                <button onclick="executeFindReplaceAll()" class="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-1.5 transition-all">
+                    <i class="fa-solid fa-rotate"></i> Thay thế tất cả các trang
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Modal -->
     <div id="settings-modal"
         class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4"

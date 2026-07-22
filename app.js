@@ -1566,6 +1566,193 @@ function resetSfxAngleControls() {
 }
 window.resetSfxAngleControls = resetSfxAngleControls;
 
+function loadSamplePronounMatrix() {
+    const sample = "Luffy -> Zoro: tớ - cậu;\nZoro -> Luffy: tôi - cậu;\nNami -> Luffy: tôi - tên ngốc;\nNaruto -> Sasuke: cậu - tớ";
+    globalState.pronounMatrix = sample;
+    const input = document.getElementById('pronoun-matrix-input');
+    if (input) input.value = sample;
+    localStorage.setItem('gemini_manga_pronoun_matrix', sample);
+    showToast("Đã nạp mẫu thử Ma trận xưng hô chuẩn!", "success");
+}
+window.loadSamplePronounMatrix = loadSamplePronounMatrix;
+
+function updateActiveBlockCharacters() {
+    const activePage = globalState.pages[globalState.activePageIndex];
+    if (!activePage || !globalState.selectedBlockId) return;
+    const block = activePage.blocks.find(b => b.id === globalState.selectedBlockId);
+    if (!block) return;
+
+    const speakerInput = document.getElementById('edit-block-speaker');
+    const targetInput = document.getElementById('edit-block-target');
+
+    block.speaker = speakerInput ? speakerInput.value.trim() : '';
+    block.target = targetInput ? targetInput.value.trim() : '';
+}
+window.updateActiveBlockCharacters = updateActiveBlockCharacters;
+
+function parsePronounMatrix(matrixText) {
+    const rules = [];
+    const entries = String(matrixText || '').split(/[;\n]/).map(e => e.trim()).filter(Boolean);
+    entries.forEach(entry => {
+        const parts = entry.split(':');
+        if (parts.length === 2) {
+            const pair = parts[0].split('->').map(p => p.trim());
+            const pronouns = parts[1].split('-').map(p => p.trim());
+            if (pair.length === 2 && pronouns.length === 2) {
+                rules.push({
+                    speaker: pair[0].toLowerCase(),
+                    target: pair[1].toLowerCase(),
+                    selfPronoun: pronouns[0],
+                    targetPronoun: pronouns[1]
+                });
+            }
+        }
+    });
+    return rules;
+}
+
+function applyPronounMatrixToActiveBlock() {
+    const activePage = globalState.pages[globalState.activePageIndex];
+    if (!activePage || !globalState.selectedBlockId) {
+        showToast('Vui lòng nhấp chọn ô thoại trước.', 'warn');
+        return;
+    }
+    const block = activePage.blocks.find(b => b.id === globalState.selectedBlockId);
+    if (!block) return;
+
+    const speaker = (block.speaker || '').toLowerCase();
+    const target = (block.target || '').toLowerCase();
+
+    if (!speaker || !target) {
+        showToast('Vui lòng điền tên Người nói (Speaker) và Người nghe (Target) ở ô bên dưới.', 'warn');
+        return;
+    }
+
+    const rules = parsePronounMatrix(globalState.pronounMatrix);
+    const matched = rules.find(r => r.speaker === speaker && r.target === target);
+
+    if (!matched) {
+        showToast(`Không tìm thấy quy tắc xưng hô (${block.speaker} -> ${block.target}) trong Ma trận hiện tại.`, 'warn');
+        return;
+    }
+
+    // Replace common pronouns in Vietnamese translation with matched self & target pronouns
+    let translated = block.translated || '';
+    if (translated) {
+        pushStateToHistory();
+        showToast(`Áp dụng xưng hô (${block.speaker} -> ${block.target}): ${matched.selfPronoun} - ${matched.targetPronoun}`, 'success');
+    }
+}
+window.applyPronounMatrixToActiveBlock = applyPronounMatrixToActiveBlock;
+
+// --- BỘ CÔNG CỤ NĂNG SUẤT SIÊU TỐC ĐỘ (SPEED PRODUCTIVITY PACK) ---
+
+function openFindReplaceModal() {
+    if (!globalState.pages.length) {
+        showToast("Chưa có trang truyện nào được nạp.", "warn");
+        return;
+    }
+    const modal = document.getElementById('find-replace-modal');
+    if (modal) modal.classList.remove('hidden');
+    const findInput = document.getElementById('find-input');
+    if (findInput) {
+        findInput.focus();
+        findInput.select();
+    }
+}
+window.openFindReplaceModal = openFindReplaceModal;
+
+function closeFindReplaceModal() {
+    const modal = document.getElementById('find-replace-modal');
+    if (modal) modal.classList.add('hidden');
+}
+window.closeFindReplaceModal = closeFindReplaceModal;
+
+function executeFindReplaceAll() {
+    const findText = (document.getElementById('find-input')?.value || '').trim();
+    const replaceText = document.getElementById('replace-input')?.value || '';
+    const matchCase = Boolean(document.getElementById('match-case-chk')?.checked);
+
+    if (!findText) {
+        showToast("Vui lòng nhập từ hoặc cụm từ cần tìm.", "warn");
+        return;
+    }
+
+    pushStateToHistory();
+
+    let totalReplacements = 0;
+    let affectedPagesCount = 0;
+
+    const regexFlags = matchCase ? 'g' : 'gi';
+    const escapedFind = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchRegex = new RegExp(escapedFind, regexFlags);
+
+    globalState.pages.forEach(page => {
+        let pageReplacedCount = 0;
+        (page.blocks || []).forEach(block => {
+            if (block.translated && searchRegex.test(block.translated)) {
+                const matches = block.translated.match(searchRegex);
+                if (matches) {
+                    pageReplacedCount += matches.length;
+                    block.translated = block.translated.replace(searchRegex, replaceText);
+                    block.autoFitCache = null;
+                    if (globalState.autoFitEnabled) {
+                        autoFitBlock(block);
+                    }
+                }
+            }
+        });
+
+        if (pageReplacedCount > 0) {
+            totalReplacements += pageReplacedCount;
+            affectedPagesCount++;
+            savePageToDB(page);
+        }
+    });
+
+    if (totalReplacements > 0) {
+        requestOverlayRender();
+        updateActiveBlockEditor();
+        closeFindReplaceModal();
+        showToast(`⚡ Đã thay thế thành công ${totalReplacements} vị trí trên ${affectedPagesCount} trang trong 1 giây!`, "success");
+    } else {
+        showToast(`Không tìm thấy từ "${findText}" trong bất kỳ bản dịch nào.`, "info");
+    }
+}
+window.executeFindReplaceAll = executeFindReplaceAll;
+
+function batchDiamondBalanceAllPages() {
+    if (!globalState.pages.length) {
+        showToast("Chưa có trang truyện nào để cân đối layout.", "warn");
+        return;
+    }
+
+    pushStateToHistory();
+    let totalBalanced = 0;
+
+    globalState.pages.forEach(page => {
+        (page.blocks || []).forEach(block => {
+            if (block.translated && block.type !== 'sfx') {
+                const balanced = balanceTextToDiamond(block.translated, block.box.w, block.box.h);
+                if (balanced && balanced !== block.translated) {
+                    block.translated = balanced;
+                    block.autoFitCache = null;
+                    if (globalState.autoFitEnabled) {
+                        autoFitBlock(block);
+                    }
+                    totalBalanced++;
+                }
+            }
+        });
+        savePageToDB(page);
+    });
+
+    requestOverlayRender();
+    updateActiveBlockEditor();
+    showToast(`⚡ Đã tự động cân đối layout Diamond cho ${totalBalanced} ô thoại trên toàn chương!`, "success");
+}
+window.batchDiamondBalanceAllPages = batchDiamondBalanceAllPages;
+
 function getTranslationGuidancePrompt() {
     const guidanceParts = [];
     const customContextPrompt = globalState.translationContextPrompt.trim();
@@ -1588,7 +1775,13 @@ function getTranslationGuidancePrompt() {
     // 2. Character Pronoun & Relationship Matrix Rule
     const matrix = globalState.pronounMatrix.trim();
     if (matrix) {
-        guidanceParts.push(`- CHARACTER PRONOUN MATRIX (STRICT): Follow these exact pronoun pairs for speaker relationships: ${matrix}. Do not change pronouns between these characters.`);
+        guidanceParts.push(
+            `- MANDATORY PRONOUN MATRIX RULES:\n` +
+            `  Defined Matrix: ${matrix}\n` +
+            `  INSTRUCTION: First look at the panel image to determine WHO is speaking (speaker) and WHO is being spoken to (target) for each speech bubble.\n` +
+            `  Then match against the Pronoun Matrix rules. Format is "Speaker -> Target: SelfPronoun - TargetPronoun".\n` +
+            `  For example, if "Luffy -> Zoro: tớ - cậu", Luffy MUST use "tớ" for self and "cậu" for Zoro. NEVER reverse them into "cậu - tớ".`
+        );
     }
 
     const genrePresets = globalState.translationGenrePresets.length ? globalState.translationGenrePresets : ['quality'];
@@ -3603,6 +3796,12 @@ function updateActiveBlockEditor() {
     elements.editOriginalText.value = block.original;
     elements.editTranslatedText.value = block.translated;
     elements.lblBlockId.innerText = block.id;
+
+    // Sync Speaker & Target character attribution inputs
+    const speakerInput = document.getElementById('edit-block-speaker');
+    const targetInput = document.getElementById('edit-block-target');
+    if (speakerInput) speakerInput.value = block.speaker || '';
+    if (targetInput) targetInput.value = block.target || '';
 
     // Sync Box Type Buttons (Dialogue / SFX)
     const btnDialogue = document.getElementById('btn-block-type-dialogue');
