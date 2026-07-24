@@ -3662,9 +3662,13 @@ function renderOverlays(targetContainer = null, customPage = null, customImgElem
         autoFitAllBlocksOnPage(page, customImgElement, forceExportScale);
     }
 
+    const imgElement = customImgElement || elements.mangaBgImage;
+    if (imgElement && imgElement.clientWidth > 0) {
+        page.lastDisplayWidth = imgElement.clientWidth;
+    }
+
     // Chuẩn bị ảnh gốc để chạy thuật toán Flood Fill nếu có block sử dụng maskShape là 'bubble-fit' (Có tích hợp cache cấp trang)
     let activeImageData = page.imageDataCache || null;
-    const imgElement = customImgElement || elements.mangaBgImage;
     const hasBubbleFit = page.blocks.some(block => (block.style.maskShape || 'bubble-fit') === 'bubble-fit');
 
     if (hasBubbleFit && !activeImageData && imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0) {
@@ -4732,17 +4736,22 @@ function wrapCanvasText(ctx, text, maxWidth) {
             continue;
         }
 
-        const words = line.trim().split(/\s+/);
-        let currentLine = words[0] || '';
+        // Tách từ theo khoảng trắng HOẶC sau dấu gạch nối (hyphen -, –, —)
+        const words = line.trim().split(/(?<=[-–—])|\s+/).filter(Boolean);
+        if (words.length === 0) continue;
+
+        let currentLine = words[0];
 
         for (let i = 1; i < words.length; i++) {
             const word = words[i];
-            const testLine = currentLine + ' ' + word;
-            if (ctx.measureText(testLine).width > maxWidth && currentLine.length > 0) {
+            const needsSpace = !currentLine.endsWith('-') && !currentLine.endsWith('–') && !currentLine.endsWith('—');
+            const testLine = needsSpace ? currentLine + ' ' + word : currentLine + word;
+
+            if (ctx.measureText(testLine).width <= maxWidth) {
+                currentLine = testLine;
+            } else {
                 resultLines.push(currentLine);
                 currentLine = word;
-            } else {
-                currentLine = testLine;
             }
         }
         if (currentLine) {
@@ -4750,6 +4759,38 @@ function wrapCanvasText(ctx, text, maxWidth) {
         }
     }
     return resultLines;
+}
+
+// Thuật toán ngắt dòng chữ dọc (Vertical Text Word Wrap - vertical-rl)
+function wrapCanvasVerticalText(text, maxHeight, fontSizePx) {
+    if (!text) return [];
+    const charStep = fontSizePx * 1.12;
+    const maxCharsPerCol = Math.max(1, Math.floor(maxHeight / charStep));
+    const paragraphs = text.split('\n');
+    const columns = [];
+
+    for (const para of paragraphs) {
+        if (!para.trim()) {
+            columns.push([]);
+            continue;
+        }
+
+        const chars = Array.from(para.trim());
+        let currentCol = [];
+
+        for (const char of chars) {
+            if (currentCol.length >= maxCharsPerCol) {
+                columns.push(currentCol);
+                currentCol = [];
+            }
+            currentCol.push(char);
+        }
+        if (currentCol.length > 0) {
+            columns.push(currentCol);
+        }
+    }
+
+    return columns;
 }
 
 // High-Precision Native Canvas 2D Export Engine (Kết xuất trực tiếp siêu nét ở độ phân giải gốc 100%, không bị lệch baseline)
@@ -4788,6 +4829,22 @@ async function renderPageToCanvas2D(page) {
     // 3. Đảm bảo phông chữ đã nạp xong
     await document.fonts.ready;
 
+    let activeImageData = page.imageDataCache || null;
+    const hasBubbleFit = page.blocks && page.blocks.some(block => (block.style.maskShape || 'bubble-fit') === 'bubble-fit');
+    if (hasBubbleFit && !activeImageData) {
+        try {
+            const bgCanvas = document.createElement('canvas');
+            bgCanvas.width = W;
+            bgCanvas.height = H;
+            const bgCtx = bgCanvas.getContext('2d');
+            bgCtx.drawImage(imgElement, 0, 0);
+            activeImageData = bgCtx.getImageData(0, 0, W, H);
+            page.imageDataCache = activeImageData;
+        } catch (e) {
+            console.error("Lỗi tạo imageDataCache khi xuất canvas:", e);
+        }
+    }
+
     // 4. Vẽ từng khối chữ dịch
     if (page.blocks && page.blocks.length > 0) {
         for (const block of page.blocks) {
@@ -4815,22 +4872,30 @@ async function renderPageToCanvas2D(page) {
             const alpha = (block.style.bgOpacity !== undefined ? block.style.bgOpacity : 100) / 100;
 
             let maskDrawn = false;
-            if (maskShape === 'bubble-fit' && block.maskCache && block.maskCache.dataUrl) {
-                await new Promise((resolve) => {
-                    const maskImg = new Image();
-                    maskImg.onload = () => {
-                        ctx.drawImage(maskImg, bx, by, bw, bh);
-                        maskDrawn = true;
-                        resolve();
-                    };
-                    maskImg.onerror = resolve;
-                    maskImg.src = block.maskCache.dataUrl;
-                });
+            if (maskShape === 'bubble-fit') {
+                if (!block.maskCache && activeImageData) {
+                    computeBubbleMask(page, block, activeImageData);
+                }
+                const maskCanvasObj = block.maskCache ? (block.maskCache.canvas || block.maskCache) : null;
+                const maskDataUrl = block.maskCache ? block.maskCache.dataUrl : (maskCanvasObj && maskCanvasObj.toDataURL ? maskCanvasObj.toDataURL() : null);
+
+                if (maskDataUrl) {
+                    await new Promise((resolve) => {
+                        const maskImg = new Image();
+                        maskImg.onload = () => {
+                            ctx.drawImage(maskImg, bx, by, bw, bh);
+                            maskDrawn = true;
+                            resolve();
+                        };
+                        maskImg.onerror = resolve;
+                        maskImg.src = maskDataUrl;
+                    });
+                }
             }
 
             if (!maskDrawn && alpha > 0) {
                 ctx.fillStyle = convertHexToRGBA(hexBgColor, alpha);
-                if (maskShape === 'ellipse') {
+                if (maskShape === 'ellipse' || maskShape === 'bubble-fit') {
                     ctx.beginPath();
                     ctx.ellipse(bx + bw / 2, by + bh / 2, bw / 2, bh / 2, 0, 0, 2 * Math.PI);
                     ctx.fill();
@@ -4863,30 +4928,15 @@ async function renderPageToCanvas2D(page) {
             else if (fontClass && !fontClass.startsWith('font-')) fontName = `'${fontClass}', sans-serif`;
 
             // Tỉ lệ quy đổi font size theo độ phân giải gốc của ảnh
-            const displayWidth = elements.mangaBgImage.clientWidth || 800;
+            const displayWidth = page.lastDisplayWidth || imgElement.clientWidth || 800;
             const scaleFactor = W / Math.max(1, displayWidth);
-            const fontSizePx = Math.round((block.style.fontSize || 16) * scaleFactor);
+            const fontSizePx = (block.style.fontSize || 16) * scaleFactor;
             const fontWeight = block.style.bold ? 'bold' : 'normal';
 
             ctx.font = `${fontWeight} ${fontSizePx}px ${fontName}`;
             ctx.fillStyle = block.style.textColor || '#000000';
-            ctx.textAlign = block.style.align || 'center';
-            ctx.textBaseline = 'middle';
 
-            // 4c. Phân chia dòng và vẽ chữ tự động xuống dòng (Word Wrap)
-            const paddingPx = Math.round((block.style.padding !== undefined ? block.style.padding : 4) * scaleFactor);
-            const maxTextWidth = Math.max(10, bw - (paddingPx * 2));
-            const textLines = wrapCanvasText(ctx, block.translated, maxTextWidth);
-
-            const lineHeight = fontSizePx * (block.style.vertical ? 1.12 : 1.18);
-            const totalTextHeight = textLines.length * lineHeight;
-
-            let startY = by + (bh / 2) - (totalTextHeight / 2) + (lineHeight / 2);
-            let startX = bx + bw / 2;
-            if (block.style.align === 'left') startX = bx + paddingPx;
-            else if (block.style.align === 'right') startX = bx + bw - paddingPx;
-
-            // Nét viền chữ (Text Stroke) & Bóng đổ (Drop Shadow)
+            const paddingPx = (block.style.padding !== undefined ? block.style.padding : 4) * scaleFactor;
             const strokeWidth = parseFloat(block.style.strokeWidth) || 0;
             const strokeColor = block.style.strokeColor || '#ffffff';
             const strokeWidthPx = strokeWidth * scaleFactor;
@@ -4895,37 +4945,106 @@ async function renderPageToCanvas2D(page) {
             const shadowColor = block.style.shadowColor || '#000000';
             const shadowBlurPx = shadowBlur * scaleFactor;
 
-            for (let i = 0; i < textLines.length; i++) {
-                const lineText = textLines[i];
-                const lineY = startY + (i * lineHeight);
+            // 4c. Dựng chữ Dọc (vertical-rl) hoặc chữ Ngang (horizontal-tb)
+            if (block.style.vertical) {
+                const maxColHeight = Math.max(10, bh - (paddingPx * 2));
+                const columns = wrapCanvasVerticalText(block.translated, maxColHeight, fontSizePx);
+                const colStep = fontSizePx * 1.12;
+                const charStep = fontSizePx * 1.12;
+                const totalTextWidth = columns.length * colStep;
 
-                // Vẽ viền chữ (Stroke) nếu strokeWidth > 0
-                if (strokeWidth > 0) {
+                let rightX = bx + bw / 2 + totalTextWidth / 2 - colStep / 2;
+                if (block.style.align === 'left') {
+                    rightX = bx + paddingPx + totalTextWidth - colStep / 2;
+                } else if (block.style.align === 'right') {
+                    rightX = bx + bw - paddingPx - colStep / 2;
+                }
+
+                for (let j = 0; j < columns.length; j++) {
+                    const colChars = columns[j];
+                    const colX = rightX - (j * colStep);
+                    const colHeight = colChars.length * charStep;
+                    const startY = by + (bh / 2) - (colHeight / 2) + (charStep / 2);
+
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    for (let k = 0; k < colChars.length; k++) {
+                        const char = colChars[k];
+                        const charY = startY + (k * charStep);
+
+                        if (strokeWidth > 0) {
+                            ctx.save();
+                            if (shadowBlur > 0) {
+                                ctx.shadowColor = shadowColor;
+                                ctx.shadowBlur = shadowBlurPx;
+                                ctx.shadowOffsetX = 0;
+                                ctx.shadowOffsetY = 0;
+                            }
+                            ctx.lineWidth = strokeWidthPx;
+                            ctx.strokeStyle = strokeColor;
+                            ctx.lineJoin = 'round';
+                            ctx.miterLimit = 2;
+                            ctx.strokeText(char, colX, charY);
+                            ctx.restore();
+                        }
+
+                        ctx.save();
+                        if (strokeWidth === 0 && shadowBlur > 0) {
+                            ctx.shadowColor = shadowColor;
+                            ctx.shadowBlur = shadowBlurPx;
+                            ctx.shadowOffsetX = 0;
+                            ctx.shadowOffsetY = 0;
+                        }
+                        ctx.fillText(char, colX, charY);
+                        ctx.restore();
+                    }
+                }
+            } else {
+                const maxTextWidth = Math.max(10, bw - (paddingPx * 2));
+                const textLines = wrapCanvasText(ctx, block.translated, maxTextWidth);
+
+                const lineHeight = fontSizePx * 1.18;
+                const totalTextHeight = textLines.length * lineHeight;
+
+                let startY = by + (bh / 2) - (totalTextHeight / 2) + (lineHeight / 2);
+                let startX = bx + bw / 2;
+                if (block.style.align === 'left') startX = bx + paddingPx;
+                else if (block.style.align === 'right') startX = bx + bw - paddingPx;
+
+                ctx.textAlign = block.style.align || 'center';
+                ctx.textBaseline = 'middle';
+
+                for (let i = 0; i < textLines.length; i++) {
+                    const lineText = textLines[i];
+                    const lineY = startY + (i * lineHeight);
+
+                    if (strokeWidth > 0) {
+                        ctx.save();
+                        if (shadowBlur > 0) {
+                            ctx.shadowColor = shadowColor;
+                            ctx.shadowBlur = shadowBlurPx;
+                            ctx.shadowOffsetX = 0;
+                            ctx.shadowOffsetY = 0;
+                        }
+                        ctx.lineWidth = strokeWidthPx;
+                        ctx.strokeStyle = strokeColor;
+                        ctx.lineJoin = 'round';
+                        ctx.miterLimit = 2;
+                        ctx.strokeText(lineText, startX, lineY);
+                        ctx.restore();
+                    }
+
                     ctx.save();
-                    if (shadowBlur > 0) {
+                    if (strokeWidth === 0 && shadowBlur > 0) {
                         ctx.shadowColor = shadowColor;
                         ctx.shadowBlur = shadowBlurPx;
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
                     }
-                    ctx.lineWidth = strokeWidthPx * 2;
-                    ctx.strokeStyle = strokeColor;
-                    ctx.lineJoin = 'round';
-                    ctx.miterLimit = 2;
-                    ctx.strokeText(lineText, startX, lineY);
+                    ctx.fillText(lineText, startX, lineY);
                     ctx.restore();
                 }
-
-                // Vẽ nội dung chữ (Fill)
-                ctx.save();
-                if (strokeWidth === 0 && shadowBlur > 0) {
-                    ctx.shadowColor = shadowColor;
-                    ctx.shadowBlur = shadowBlurPx;
-                    ctx.shadowOffsetX = 0;
-                    ctx.shadowOffsetY = 0;
-                }
-                ctx.fillText(lineText, startX, lineY);
-                ctx.restore();
             }
 
             ctx.restore();
