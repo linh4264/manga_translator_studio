@@ -4500,8 +4500,8 @@ function autoFitBlock(block, customImgElement = null, forceExportScale = 1) {
     const targetWidth = (block.box.w / 100) * displayWidth;
     const targetHeight = (block.box.h / 100) * displayHeight;
 
-    const isEllipseShape = maskShape === 'ellipse' || maskShape === 'bubble-fit';
-    const fitMargin = isEllipseShape ? 0.77 : 0.93;
+    const isEllipseShape = maskShape === 'ellipse';
+    const fitMargin = isEllipseShape ? 0.82 : 0.95;
 
     if (block.style.vertical) {
         ruler.style.height = `${targetHeight * fitMargin}px`;
@@ -4927,6 +4927,64 @@ async function renderPageToCanvas2D(page) {
             const shadowBlurPx = shadowBlur * scaleFactor;
 
             const maskShape = block.style.maskShape || 'bubble-fit';
+            const maskSize = block.style.maskSize || 'full';
+
+            // Tính toán kích thước khối chữ trước để hỗ trợ maskSize 'snug' chuẩn xác như DOM Editor
+            let textLines = [];
+            let columns = [];
+            let totalTextWidth = 0;
+            let totalTextHeight = 0;
+
+            const insetPad = Math.max(1, Math.round(scaleFactor * 0.8));
+            let fillBx = bx + insetPad;
+            let fillBy = by + insetPad;
+            let fillBw = Math.max(1, bw - (insetPad * 2));
+            let fillBh = Math.max(1, bh - (insetPad * 2));
+
+            const strokeExtra = strokeWidthPx > 0 ? (strokeWidthPx * 1.2) : 0;
+            const safetyMargin = Math.max(2, Math.round(scaleFactor * 2));
+
+            if (block.style.vertical) {
+                const maxColHeight = Math.max(10, bh - (paddingPx * 2) - strokeExtra - safetyMargin);
+                columns = wrapCanvasVerticalText(block.translated, maxColHeight, fontSizePx);
+                const colStep = fontSizePx * 1.12;
+                const charStep = fontSizePx * 1.12;
+                totalTextWidth = columns.length * colStep;
+                let maxColLength = 0;
+                columns.forEach(c => { if (c.length > maxColLength) maxColLength = c.length; });
+                totalTextHeight = maxColLength * charStep;
+
+                if (maskSize === 'snug') {
+                    const snugW = Math.min(fillBw, totalTextWidth + (paddingPx * 2));
+                    const snugH = Math.min(fillBh, totalTextHeight + (paddingPx * 2));
+                    fillBx = bx + (bw - snugW) / 2;
+                    fillBy = by + (bh - snugH) / 2;
+                    fillBw = snugW;
+                    fillBh = snugH;
+                }
+            } else {
+                const maxTextWidth = Math.max(10, bw - (paddingPx * 2) - strokeExtra - safetyMargin);
+                textLines = wrapCanvasText(ctx, block.translated, maxTextWidth);
+                const lineHeight = fontSizePx * 1.18;
+                totalTextHeight = textLines.length * lineHeight;
+                let maxLineWidth = 0;
+                textLines.forEach(line => {
+                    const w = ctx.measureText(line).width;
+                    if (w > maxLineWidth) maxLineWidth = w;
+                });
+                totalTextWidth = maxLineWidth;
+
+                if (maskSize === 'snug') {
+                    const snugW = Math.min(fillBw, totalTextWidth + (paddingPx * 2));
+                    const snugH = Math.min(fillBh, totalTextHeight + (paddingPx * 2));
+                    fillBx = bx + (bw - snugW) / 2;
+                    if (block.style.align === 'left') fillBx = bx + insetPad;
+                    else if (block.style.align === 'right') fillBx = bx + bw - snugW - insetPad;
+                    fillBy = by + (bh - snugH) / 2;
+                    fillBw = snugW;
+                    fillBh = snugH;
+                }
+            }
 
             // 4b. Vẽ phông che (Background Fill Mask)
             const hexBgColor = block.style.bgColor || '#ffffff';
@@ -4958,19 +5016,19 @@ async function renderPageToCanvas2D(page) {
                 ctx.fillStyle = convertHexToRGBA(hexBgColor, alpha);
                 if (maskShape === 'ellipse') {
                     ctx.beginPath();
-                    ctx.ellipse(bx + bw / 2, by + bh / 2, bw / 2, bh / 2, 0, 0, 2 * Math.PI);
+                    ctx.ellipse(fillBx + fillBw / 2, fillBy + fillBh / 2, fillBw / 2, fillBh / 2, 0, 0, 2 * Math.PI);
                     ctx.fill();
                 } else if (maskShape === 'rounded') {
-                    const r = Math.min(16, bw / 4, bh / 4);
+                    const r = Math.min(16, fillBw / 4, fillBh / 4);
                     ctx.beginPath();
                     if (ctx.roundRect) {
-                        ctx.roundRect(bx, by, bw, bh, r);
+                        ctx.roundRect(fillBx, fillBy, fillBw, fillBh, r);
                     } else {
-                        ctx.rect(bx, by, bw, bh);
+                        ctx.rect(fillBx, fillBy, fillBw, fillBh);
                     }
                     ctx.fill();
                 } else {
-                    ctx.fillRect(bx, by, bw, bh);
+                    ctx.fillRect(fillBx, fillBy, fillBw, fillBh);
                 }
             }
 
@@ -4980,11 +5038,8 @@ async function renderPageToCanvas2D(page) {
 
             // 4c. Dựng chữ Dọc (vertical-rl) hoặc chữ Ngang (horizontal-tb)
             if (block.style.vertical) {
-                const maxColHeight = Math.max(10, bh - (paddingPx * 2));
-                const columns = wrapCanvasVerticalText(block.translated, maxColHeight, fontSizePx);
                 const colStep = fontSizePx * 1.12;
                 const charStep = fontSizePx * 1.12;
-                const totalTextWidth = columns.length * colStep;
 
                 let rightX = bx + bw / 2 + totalTextWidth / 2 - colStep / 2;
                 if (block.style.align === 'left') {
@@ -5037,10 +5092,7 @@ async function renderPageToCanvas2D(page) {
                     }
                 }
             } else {
-                const maxTextWidth = Math.max(10, bw - (paddingPx * 2));
-                const textLines = wrapCanvasText(ctx, block.translated, maxTextWidth);
                 const lineHeight = fontSizePx * 1.18;
-                const totalTextHeight = textLines.length * lineHeight;
 
                 let startY = by + (bh / 2) - (totalTextHeight / 2) + (lineHeight / 2);
                 const minStartY = by + paddingPx + (lineHeight / 2);
@@ -5251,23 +5303,18 @@ async function exportActivePage() {
 
         let canvas;
         try {
-            canvas = await renderPageToCanvasSVG(page);
-        } catch (svgErr) {
-            console.warn("SVG foreignObject export fallback to Canvas 2D:", svgErr);
-            try {
-                canvas = await renderPageToCanvas2D(page);
-            } catch (c2dErr) {
-                console.warn("Canvas 2D Export fallback to html2canvas:", c2dErr);
-                canvas = await html2canvas(container, {
-                    useCORS: true,
-                    allowTaint: true,
-                    scale: 2,
-                    backgroundColor: null,
-                    logging: false,
-                    scrollX: 0,
-                    scrollY: 0
-                });
-            }
+            canvas = await renderPageToCanvas2D(page);
+        } catch (c2dErr) {
+            console.warn("Canvas 2D Export fallback to html2canvas:", c2dErr);
+            canvas = await html2canvas(container, {
+                useCORS: true,
+                allowTaint: true,
+                scale: 2,
+                backgroundColor: null,
+                logging: false,
+                scrollX: 0,
+                scrollY: 0
+            });
         }
 
         const pngBlob = await new Promise((resolve, reject) => {
@@ -5377,19 +5424,15 @@ async function runBatchExport() {
 
                 let canvas;
                 try {
-                    canvas = await renderPageToCanvasSVG(page);
-                } catch (svgErr) {
-                    try {
-                        canvas = await renderPageToCanvas2D(page);
-                    } catch (c2dErr) {
-                        canvas = await html2canvas(container, {
-                            useCORS: true,
-                            allowTaint: true,
-                            scale: 2,
-                            backgroundColor: null,
-                            logging: false
-                        });
-                    }
+                    canvas = await renderPageToCanvas2D(page);
+                } catch (c2dErr) {
+                    canvas = await html2canvas(container, {
+                        useCORS: true,
+                        allowTaint: true,
+                        scale: 2,
+                        backgroundColor: null,
+                        logging: false
+                    });
                 }
 
                 const pngBlob = await new Promise((resolve, reject) => {
