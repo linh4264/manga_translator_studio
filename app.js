@@ -3634,10 +3634,16 @@ function computeBubbleMask(page, block, imageData) {
 
     maskCtx.putImageData(maskImgData, 0, 0);
 
+    const maskDataUrl = maskCanvas.toDataURL();
     // Cache canvas để tránh encode base64 lặp lại (tiết kiệm RAM/Garbage Collection)
     block.maskCache = {
         key: cacheKey,
-        canvas: maskCanvas
+        canvas: maskCanvas,
+        finalBx,
+        finalBy,
+        finalBw,
+        finalBh,
+        dataUrl: maskDataUrl
     };
     return maskCanvas;
 }
@@ -4731,13 +4737,30 @@ function wrapCanvasText(ctx, text, maxWidth) {
     const resultLines = [];
 
     for (const line of rawLines) {
-        if (!line.trim()) {
+        const trimmed = line.trim();
+        if (!trimmed) {
             resultLines.push('');
             continue;
         }
 
-        // Tách từ theo khoảng trắng HOẶC sau dấu gạch nối (hyphen -, –, —)
-        const words = line.trim().split(/(?<=[-–—])|\s+/).filter(Boolean);
+        const spaceTokens = trimmed.split(/\s+/);
+        const words = [];
+
+        for (const token of spaceTokens) {
+            if (!token) continue;
+            const parts = token.split(/([-–—])/);
+            let subWord = '';
+            for (let p = 0; p < parts.length; p++) {
+                const part = parts[p];
+                if (!part) continue;
+                subWord += part;
+                if (part === '-' || part === '–' || part === '—' || p === parts.length - 1) {
+                    words.push(subWord);
+                    subWord = '';
+                }
+            }
+        }
+
         if (words.length === 0) continue;
 
         let currentLine = words[0];
@@ -4866,54 +4889,12 @@ async function renderPageToCanvas2D(page) {
                 ctx.translate(-cx, -cy);
             }
 
-            // 4a. Vẽ phông che (Background Fill Mask)
-            const maskShape = block.style.maskShape || 'bubble-fit';
-            const hexBgColor = block.style.bgColor || '#ffffff';
-            const alpha = (block.style.bgOpacity !== undefined ? block.style.bgOpacity : 100) / 100;
+            // Xử lý clip giới hạn vẽ nghiêm ngặt trong khung box (Tránh phình/kéo bong bóng ra ngoài khung)
+            ctx.beginPath();
+            ctx.rect(bx - 0.5, by - 0.5, bw + 1, bh + 1);
+            ctx.clip();
 
-            let maskDrawn = false;
-            if (maskShape === 'bubble-fit') {
-                if (!block.maskCache && activeImageData) {
-                    computeBubbleMask(page, block, activeImageData);
-                }
-                const maskCanvasObj = block.maskCache ? (block.maskCache.canvas || block.maskCache) : null;
-                const maskDataUrl = block.maskCache ? block.maskCache.dataUrl : (maskCanvasObj && maskCanvasObj.toDataURL ? maskCanvasObj.toDataURL() : null);
-
-                if (maskDataUrl) {
-                    await new Promise((resolve) => {
-                        const maskImg = new Image();
-                        maskImg.onload = () => {
-                            ctx.drawImage(maskImg, bx, by, bw, bh);
-                            maskDrawn = true;
-                            resolve();
-                        };
-                        maskImg.onerror = resolve;
-                        maskImg.src = maskDataUrl;
-                    });
-                }
-            }
-
-            if (!maskDrawn && alpha > 0) {
-                ctx.fillStyle = convertHexToRGBA(hexBgColor, alpha);
-                if (maskShape === 'ellipse' || maskShape === 'bubble-fit') {
-                    ctx.beginPath();
-                    ctx.ellipse(bx + bw / 2, by + bh / 2, bw / 2, bh / 2, 0, 0, 2 * Math.PI);
-                    ctx.fill();
-                } else if (maskShape === 'rounded') {
-                    const r = Math.min(16, bw / 4, bh / 4);
-                    ctx.beginPath();
-                    if (ctx.roundRect) {
-                        ctx.roundRect(bx, by, bw, bh, r);
-                    } else {
-                        ctx.rect(bx, by, bw, bh);
-                    }
-                    ctx.fill();
-                } else {
-                    ctx.fillRect(bx, by, bw, bh);
-                }
-            }
-
-            // 4b. Định dạng Font & Màu chữ
+            // 4a. Định dạng Font & Màu chữ
             const fontClass = block.style.fontFamily || 'font-comic';
             let fontName = "'Patrick Hand', cursive";
             if (fontClass === 'font-manga') fontName = "'Nunito', sans-serif";
@@ -4945,6 +4926,58 @@ async function renderPageToCanvas2D(page) {
             const shadowColor = block.style.shadowColor || '#000000';
             const shadowBlurPx = shadowBlur * scaleFactor;
 
+            const maskShape = block.style.maskShape || 'bubble-fit';
+
+            // 4b. Vẽ phông che (Background Fill Mask)
+            const hexBgColor = block.style.bgColor || '#ffffff';
+            const alpha = (block.style.bgOpacity !== undefined ? block.style.bgOpacity : 100) / 100;
+
+            let maskDrawn = false;
+            if (maskShape === 'bubble-fit') {
+                if (!block.maskCache && activeImageData) {
+                    computeBubbleMask(page, block, activeImageData);
+                }
+                const maskCanvasObj = block.maskCache ? (block.maskCache.canvas || block.maskCache) : null;
+                const maskDataUrl = block.maskCache ? block.maskCache.dataUrl : (maskCanvasObj && maskCanvasObj.toDataURL ? maskCanvasObj.toDataURL() : null);
+
+                if (maskDataUrl) {
+                    await new Promise((resolve) => {
+                        const maskImg = new Image();
+                        maskImg.onload = () => {
+                            ctx.drawImage(maskImg, bx, by, bw, bh);
+                            maskDrawn = true;
+                            resolve();
+                        };
+                        maskImg.onerror = resolve;
+                        maskImg.src = maskDataUrl;
+                    });
+                }
+            }
+
+            if (!maskDrawn && alpha > 0) {
+                ctx.fillStyle = convertHexToRGBA(hexBgColor, alpha);
+                if (maskShape === 'ellipse') {
+                    ctx.beginPath();
+                    ctx.ellipse(bx + bw / 2, by + bh / 2, bw / 2, bh / 2, 0, 0, 2 * Math.PI);
+                    ctx.fill();
+                } else if (maskShape === 'rounded') {
+                    const r = Math.min(16, bw / 4, bh / 4);
+                    ctx.beginPath();
+                    if (ctx.roundRect) {
+                        ctx.roundRect(bx, by, bw, bh, r);
+                    } else {
+                        ctx.rect(bx, by, bw, bh);
+                    }
+                    ctx.fill();
+                } else {
+                    ctx.fillRect(bx, by, bw, bh);
+                }
+            }
+
+            // Đảm bảo lại font & fillStyle trước khi vẽ chữ đè lên phông che
+            ctx.font = `${fontWeight} ${fontSizePx}px ${fontName}`;
+            ctx.fillStyle = block.style.textColor || '#000000';
+
             // 4c. Dựng chữ Dọc (vertical-rl) hoặc chữ Ngang (horizontal-tb)
             if (block.style.vertical) {
                 const maxColHeight = Math.max(10, bh - (paddingPx * 2));
@@ -4964,7 +4997,9 @@ async function renderPageToCanvas2D(page) {
                     const colChars = columns[j];
                     const colX = rightX - (j * colStep);
                     const colHeight = colChars.length * charStep;
-                    const startY = by + (bh / 2) - (colHeight / 2) + (charStep / 2);
+                    let startY = by + (bh / 2) - (colHeight / 2) + (charStep / 2);
+                    const minStartY = by + paddingPx + (charStep / 2);
+                    if (startY < minStartY) startY = minStartY;
 
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
@@ -4996,6 +5031,7 @@ async function renderPageToCanvas2D(page) {
                             ctx.shadowOffsetX = 0;
                             ctx.shadowOffsetY = 0;
                         }
+                        ctx.fillStyle = block.style.textColor || '#000000';
                         ctx.fillText(char, colX, charY);
                         ctx.restore();
                     }
@@ -5003,11 +5039,13 @@ async function renderPageToCanvas2D(page) {
             } else {
                 const maxTextWidth = Math.max(10, bw - (paddingPx * 2));
                 const textLines = wrapCanvasText(ctx, block.translated, maxTextWidth);
-
                 const lineHeight = fontSizePx * 1.18;
                 const totalTextHeight = textLines.length * lineHeight;
 
                 let startY = by + (bh / 2) - (totalTextHeight / 2) + (lineHeight / 2);
+                const minStartY = by + paddingPx + (lineHeight / 2);
+                if (startY < minStartY) startY = minStartY;
+
                 let startX = bx + bw / 2;
                 if (block.style.align === 'left') startX = bx + paddingPx;
                 else if (block.style.align === 'right') startX = bx + bw - paddingPx;
@@ -5042,6 +5080,7 @@ async function renderPageToCanvas2D(page) {
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
                     }
+                    ctx.fillStyle = block.style.textColor || '#000000';
                     ctx.fillText(lineText, startX, lineY);
                     ctx.restore();
                 }
