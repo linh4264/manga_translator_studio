@@ -3793,7 +3793,7 @@ function renderOverlays(targetContainer = null, customPage = null, customImgElem
         maskContent.style.textAlign = block.style.align || 'center';
 
         let displayFontSize = block.style.fontSize || 16;
-        if (forceExportScale !== 1 && !globalState.autoFitEnabled) {
+        if (forceExportScale !== 1) {
             // Không sử dụng Math.round để tránh sai số làm tròn pixel khi co dãn layout chữ
             displayFontSize = displayFontSize * forceExportScale;
         }
@@ -5054,6 +5054,112 @@ async function renderPageToCanvas2D(page) {
     return canvas;
 }
 
+// High-Precision SVG ForeignObject DOM Mirror Export Engine (Xuất ảnh chuẩn 100% khớp giao diện Edit)
+async function renderPageToCanvasSVG(page) {
+    const imgElement = elements.mangaBgImage;
+    if (!imgElement || !imgElement.naturalWidth || !imgElement.naturalHeight) {
+        throw new Error("Dữ liệu ảnh gốc chưa sẵn sàng.");
+    }
+
+    const W = imgElement.naturalWidth;
+    const H = imgElement.naturalHeight;
+
+    const displayWidth = page.lastDisplayWidth || imgElement.clientWidth || 800;
+    const forceExportScale = W / Math.max(1, displayWidth);
+
+    const mirrorContainer = document.createElement('div');
+    mirrorContainer.style.position = 'absolute';
+    mirrorContainer.style.left = '-99999px';
+    mirrorContainer.style.top = '0';
+    mirrorContainer.style.width = `${W}px`;
+    mirrorContainer.style.height = `${H}px`;
+    mirrorContainer.style.overflow = 'hidden';
+    mirrorContainer.style.boxSizing = 'border-box';
+    document.body.appendChild(mirrorContainer);
+
+    try {
+        await document.fonts.ready;
+        renderOverlays(mirrorContainer, page, imgElement, forceExportScale);
+        await waitForNextPaint();
+
+        const cssStyles = `
+            @import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,700;1,400&family=Comic+Neue:wght@400;700&family=Nunito:wght@400;700&family=Patrick+Hand&family=Bangers&family=Permanent+Marker&family=Bungee&family=Caveat:wght@400;700&family=Chakra+Petch:wght@400;700&family=Saira+Condensed:wght@400;700&display=swap');
+            * { box-sizing: border-box; }
+            .bubble-overlay { position: absolute; box-sizing: border-box; }
+            .text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
+            .font-comic { font-family: 'Patrick Hand', cursive; }
+            .font-manga { font-family: 'Nunito', sans-serif; }
+            .font-vietnamese { font-family: 'Be Vietnam Pro', 'Inter', sans-serif; }
+            .font-comicneue { font-family: 'Comic Neue', cursive; }
+            .font-impact { font-family: 'Bangers', cursive; }
+            .font-marker { font-family: 'Permanent Marker', cursive; }
+            .font-bungee { font-family: 'Bungee', cursive; }
+            .font-caveat { font-family: 'Caveat', cursive; }
+            .font-tech { font-family: 'Chakra Petch', sans-serif; }
+            .font-condensed { font-family: 'Saira Condensed', sans-serif; }
+            .resize-handle { display: none !important; }
+        `;
+
+        const svgString = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+                <style>${cssStyles}</style>
+                <foreignObject width="100%" height="100%">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="width:${W}px; height:${H}px; position:relative; background:transparent;">
+                        ${mirrorContainer.innerHTML}
+                    </div>
+                </foreignObject>
+            </svg>
+        `;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+
+        // 1. Vẽ Ảnh gốc
+        ctx.drawImage(imgElement, 0, 0, W, H);
+
+        // 2. Vẽ Lớp Tẩy thô (Eraser Layer) nếu có
+        if (page.eraserCanvasDataUrl) {
+            await new Promise((resolve) => {
+                const eraserImg = new Image();
+                eraserImg.onload = () => {
+                    ctx.drawImage(eraserImg, 0, 0, W, H);
+                    resolve();
+                };
+                eraserImg.onerror = resolve;
+                eraserImg.src = page.eraserCanvasDataUrl;
+            });
+        } else if (elements.eraserCanvas && elements.eraserCanvas.width > 0) {
+            ctx.drawImage(elements.eraserCanvas, 0, 0, W, H);
+        }
+
+        // 3. Vẽ HTML DOM Overlay qua SVG ForeignObject
+        const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+
+        await new Promise((resolve, reject) => {
+            const svgImg = new Image();
+            svgImg.onload = () => {
+                ctx.drawImage(svgImg, 0, 0, W, H);
+                URL.revokeObjectURL(svgUrl);
+                resolve();
+            };
+            svgImg.onerror = (err) => {
+                URL.revokeObjectURL(svgUrl);
+                reject(err);
+            };
+            svgImg.src = svgUrl;
+        });
+
+        return canvas;
+    } finally {
+        if (mirrorContainer.parentNode) {
+            mirrorContainer.parentNode.removeChild(mirrorContainer);
+        }
+    }
+}
+
 // Render and download page with translation overlays
 async function exportActivePage() {
     if (globalState.activePageIndex === -1) return;
@@ -5106,18 +5212,23 @@ async function exportActivePage() {
 
         let canvas;
         try {
-            canvas = await renderPageToCanvas2D(page);
-        } catch (c2dErr) {
-            console.warn("Canvas 2D Export fallback to html2canvas:", c2dErr);
-            canvas = await html2canvas(container, {
-                useCORS: true,
-                allowTaint: true,
-                scale: 2,
-                backgroundColor: null,
-                logging: false,
-                scrollX: 0,
-                scrollY: 0
-            });
+            canvas = await renderPageToCanvasSVG(page);
+        } catch (svgErr) {
+            console.warn("SVG foreignObject export fallback to Canvas 2D:", svgErr);
+            try {
+                canvas = await renderPageToCanvas2D(page);
+            } catch (c2dErr) {
+                console.warn("Canvas 2D Export fallback to html2canvas:", c2dErr);
+                canvas = await html2canvas(container, {
+                    useCORS: true,
+                    allowTaint: true,
+                    scale: 2,
+                    backgroundColor: null,
+                    logging: false,
+                    scrollX: 0,
+                    scrollY: 0
+                });
+            }
         }
 
         const pngBlob = await new Promise((resolve, reject) => {
@@ -5227,15 +5338,19 @@ async function runBatchExport() {
 
                 let canvas;
                 try {
-                    canvas = await renderPageToCanvas2D(page);
-                } catch (c2dErr) {
-                    canvas = await html2canvas(container, {
-                        useCORS: true,
-                        allowTaint: true,
-                        scale: 2,
-                        backgroundColor: null,
-                        logging: false
-                    });
+                    canvas = await renderPageToCanvasSVG(page);
+                } catch (svgErr) {
+                    try {
+                        canvas = await renderPageToCanvas2D(page);
+                    } catch (c2dErr) {
+                        canvas = await html2canvas(container, {
+                            useCORS: true,
+                            allowTaint: true,
+                            scale: 2,
+                            backgroundColor: null,
+                            logging: false
+                        });
+                    }
                 }
 
                 const pngBlob = await new Promise((resolve, reject) => {
